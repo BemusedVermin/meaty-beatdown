@@ -1,0 +1,2160 @@
+{
+  "config": {
+    "ap": {
+      "AP_BASE": 3,
+      "REFILL_TO_MAX": true,
+      "TEMPO_TIER_THRESHOLDS": [
+        1,
+        3,
+        5
+      ]
+    },
+    "combat": {
+      "CH_DAMAGE_MULT": 81920,
+      "CH_HITSTUN_BONUS": 6,
+      "GUARD_BREAK_STUN_TICKS": 40,
+      "JUGGLE_DAMAGE_DECAY": 58982,
+      "PARRY_AP_REFUND": 2,
+      "PARRY_FOCUS_REFUND": 1,
+      "PARRY_FREEZE_TICKS": 30,
+      "PARRY_RECOVER_TICKS": 4,
+      "THROW_TECH_RECOVER_TICKS": 8
+    },
+    "combo": {
+      "HITSTUN_DECAY_PER_HIT": 2,
+      "MIN_HITSTUN": 1
+    },
+    "features": {
+      "DAMAGE_VARIANCE": false,
+      "STARTUP_CANCELABLE_BY_DEFAULT": false,
+      "THROWS_BEAT_ARMOR": true
+    },
+    "resources": {
+      "STAMINA_REGEN_PER_TICK": 1
+    },
+    "rpg": {
+      "BASE_FOCUS": 10,
+      "BASE_HP": 100,
+      "BASE_POISE": 30,
+      "BASE_STAMINA": 50,
+      "CON_HP_PER_MOD": 10,
+      "CON_POISE_PER_MOD": 3,
+      "CON_STAMINA_PER_MOD": 5,
+      "DEX_ADVANCE_PER_MOD": 1,
+      "DEX_STARTUP_REDUCTION_CAP": 3,
+      "DEX_STARTUP_REDUCTION_PER_MOD": 1,
+      "INT_FOCUS_PER_MOD": 2,
+      "MIN_STARTUP": 1,
+      "STR_ARMOR_HITS_CAP": 2,
+      "STR_ARMOR_HITS_PER_MOD": 1,
+      "STR_DAMAGE_PER_MOD": 2
+    },
+    "tick": {
+      "TICKS_PER_SECOND": 60
+    }
+  },
+  "decisions": [
+    [
+      {
+        "action": {
+          "kind": "MOVE",
+          "moveId": "tempo_jab"
+        },
+        "kind": "action"
+      },
+      {
+        "kind": "cancel",
+        "result": {
+          "kind": "MOVE",
+          "moveId": "homing_sweep"
+        }
+      },
+      {
+        "kind": "cancel",
+        "result": {
+          "kind": "MOVE",
+          "moveId": "heavy_cleave"
+        }
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      }
+    ],
+    [
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      }
+    ]
+  ],
+  "initialState": {
+    "entities": [
+      {
+        "comboCount": 0,
+        "id": "Borin",
+        "readyTick": 0,
+        "resources": {
+          "ap": 3,
+          "apMax": 3,
+          "focus": 20,
+          "focusMax": 20,
+          "hp": 100,
+          "hpMax": 100,
+          "poise": 30,
+          "poiseMax": 30,
+          "stamina": 99,
+          "staminaMax": 99
+        },
+        "spatial": {
+          "facing": 1,
+          "height": 65536,
+          "offset": 0,
+          "pos": 0
+        },
+        "state": {
+          "kind": "NEUTRAL"
+        }
+      },
+      {
+        "comboCount": 0,
+        "id": "Reza",
+        "readyTick": 0,
+        "resources": {
+          "ap": 5,
+          "apMax": 5,
+          "focus": 20,
+          "focusMax": 20,
+          "hp": 100,
+          "hpMax": 100,
+          "poise": 30,
+          "poiseMax": 30,
+          "stamina": 99,
+          "staminaMax": 99
+        },
+        "spatial": {
+          "facing": -1,
+          "height": 65536,
+          "offset": 0,
+          "pos": 65536
+        },
+        "state": {
+          "kind": "NEUTRAL"
+        }
+      }
+    ],
+    "t": 0
+  },
+  "moveTables": [
+    {
+      "guard": {
+        "cancelWindows": [],
+        "cost": {
+          "ap": 0,
+          "apGain": null,
+          "focus": 0,
+          "stamina": 3
+        },
+        "hitEffect": {
+          "blockstun": 0,
+          "chipDamage": 0,
+          "damage": 0,
+          "hitstun": 0,
+          "knockback": 0,
+          "knockdown": false,
+          "launches": false
+        },
+        "level": "MID",
+        "properties": [
+          {
+            "covers": [
+              "HIGH",
+              "MID"
+            ],
+            "kind": "BLOCK",
+            "window": {
+              "from": 0,
+              "to": 25
+            }
+          }
+        ],
+        "reach": {
+          "advance": 0,
+          "heightHigh": 131072,
+          "heightLow": 0,
+          "lateralBand": 65536,
+          "maxRange": 0,
+          "minRange": 0,
+          "stepIn": 0,
+          "trackSide": 0
+        },
+        "startupCancelable": false,
+        "timing": {
+          "active": 20,
+          "recovery": 4,
+          "startup": 2
+        }
+      },
+      "heavy_cleave": {
+        "cancelWindows": [],
+        "cost": {
+          "ap": 3,
+          "apGain": null,
+          "focus": 0,
+          "stamina": 12
+        },
+        "hitEffect": {
+          "blockstun": 12,
+          "chipDamage": 0,
+          "damage": 40,
+          "hitstun": 23,
+          "knockback": 196608,
+          "knockdown": true,
+          "launches": false
+        },
+        "level": "MID",
+        "properties": [
+          {
+            "armorDamageMult": 65536,
+            "armorHits": 4,
+            "kind": "ARMOR",
+            "window": {
+              "from": 4,
+              "to": 14
+            }
+          }
+        ],
+        "reach": {
+          "advance": 65536,
+          "heightHigh": 131072,
+          "heightLow": 0,
+          "lateralBand": 65536,
+          "maxRange": 262144,
+          "minRange": 0,
+          "stepIn": 0,
+          "trackSide": 0
+        },
+        "startupCancelable": false,
+        "timing": {
+          "active": 3,
+          "recovery": 18,
+          "startup": 14
+        }
+      },
+      "homing_sweep": {
+        "cancelWindows": [
+          {
+            "cost": {
+              "ap": 0,
+              "apGain": null,
+              "focus": 0,
+              "stamina": 0
+            },
+            "from": 11,
+            "gate": "ON_HIT",
+            "into": [
+              "heavy_cleave"
+            ],
+            "to": 22
+          }
+        ],
+        "cost": {
+          "ap": 2,
+          "apGain": null,
+          "focus": 4,
+          "stamina": 0
+        },
+        "hitEffect": {
+          "blockstun": 0,
+          "chipDamage": 0,
+          "damage": 18,
+          "hitstun": 14,
+          "knockback": 131072,
+          "knockdown": false,
+          "launches": false
+        },
+        "level": "MID",
+        "properties": [],
+        "reach": {
+          "advance": 0,
+          "heightHigh": 131072,
+          "heightLow": 0,
+          "lateralBand": 65536,
+          "maxRange": 196608,
+          "minRange": 0,
+          "stepIn": 131072,
+          "trackSide": 0
+        },
+        "startupCancelable": false,
+        "timing": {
+          "active": 3,
+          "recovery": 12,
+          "startup": 8
+        }
+      },
+      "parry": {
+        "cancelWindows": [],
+        "cost": {
+          "ap": 0,
+          "apGain": {
+            "amount": 2,
+            "gate": "ON_PARRY"
+          },
+          "focus": 3,
+          "stamina": 0
+        },
+        "hitEffect": {
+          "blockstun": 0,
+          "chipDamage": 0,
+          "damage": 0,
+          "hitstun": 0,
+          "knockback": 0,
+          "knockdown": false,
+          "launches": false
+        },
+        "level": "MID",
+        "properties": [
+          {
+            "kind": "GUARD_POINT",
+            "window": {
+              "from": 2,
+              "to": 5
+            }
+          }
+        ],
+        "reach": {
+          "advance": 0,
+          "heightHigh": 131072,
+          "heightLow": 0,
+          "lateralBand": 65536,
+          "maxRange": 0,
+          "minRange": 0,
+          "stepIn": 0,
+          "trackSide": 0
+        },
+        "startupCancelable": false,
+        "timing": {
+          "active": 4,
+          "recovery": 12,
+          "startup": 2
+        }
+      },
+      "tempo_jab": {
+        "cancelWindows": [
+          {
+            "cost": {
+              "ap": 0,
+              "apGain": null,
+              "focus": 4,
+              "stamina": 0
+            },
+            "from": 7,
+            "gate": "ON_HIT",
+            "into": [
+              "homing_sweep"
+            ],
+            "to": 12
+          }
+        ],
+        "cost": {
+          "ap": 1,
+          "apGain": {
+            "amount": 2,
+            "gate": "ON_CH"
+          },
+          "focus": 0,
+          "stamina": 5
+        },
+        "hitEffect": {
+          "blockstun": 4,
+          "chipDamage": 0,
+          "damage": 8,
+          "hitstun": 10,
+          "knockback": 65536,
+          "knockdown": false,
+          "launches": false
+        },
+        "level": "MID",
+        "properties": [],
+        "reach": {
+          "advance": 0,
+          "heightHigh": 131072,
+          "heightLow": 0,
+          "lateralBand": 32768,
+          "maxRange": 196608,
+          "minRange": 0,
+          "stepIn": 0,
+          "trackSide": 0
+        },
+        "startupCancelable": false,
+        "timing": {
+          "active": 2,
+          "recovery": 6,
+          "startup": 5
+        }
+      }
+    },
+    {
+      "backdash": {
+        "cancelWindows": [],
+        "cost": {
+          "ap": 0,
+          "apGain": null,
+          "focus": 0,
+          "stamina": 5
+        },
+        "hitEffect": {
+          "blockstun": 0,
+          "chipDamage": 0,
+          "damage": 0,
+          "hitstun": 0,
+          "knockback": 0,
+          "knockdown": false,
+          "launches": false
+        },
+        "level": "MID",
+        "motion": {
+          "lane": -131072,
+          "offset": 0
+        },
+        "properties": [
+          {
+            "invulnType": "STRIKE",
+            "kind": "INVULN",
+            "window": {
+              "from": 0,
+              "to": 4
+            }
+          }
+        ],
+        "reach": {
+          "advance": 0,
+          "heightHigh": 131072,
+          "heightLow": 0,
+          "lateralBand": 65536,
+          "maxRange": 0,
+          "minRange": 0,
+          "stepIn": 0,
+          "trackSide": 0
+        },
+        "startupCancelable": false,
+        "timing": {
+          "active": 2,
+          "recovery": 8,
+          "startup": 3
+        }
+      },
+      "light_jab": {
+        "cancelWindows": [
+          {
+            "cost": {
+              "ap": 0,
+              "apGain": null,
+              "focus": 2,
+              "stamina": 0
+            },
+            "from": 5,
+            "gate": "ON_HIT",
+            "into": [
+              "light_slash"
+            ],
+            "to": 9
+          }
+        ],
+        "cost": {
+          "ap": 1,
+          "apGain": {
+            "amount": 1,
+            "gate": "ON_HIT"
+          },
+          "focus": 0,
+          "stamina": 4
+        },
+        "hitEffect": {
+          "blockstun": 4,
+          "chipDamage": 0,
+          "damage": 8,
+          "hitstun": 8,
+          "knockback": 65536,
+          "knockdown": false,
+          "launches": false
+        },
+        "level": "MID",
+        "properties": [],
+        "reach": {
+          "advance": 0,
+          "heightHigh": 131072,
+          "heightLow": 0,
+          "lateralBand": 32768,
+          "maxRange": 131072,
+          "minRange": 0,
+          "stepIn": 0,
+          "trackSide": 0
+        },
+        "startupCancelable": false,
+        "timing": {
+          "active": 2,
+          "recovery": 5,
+          "startup": 3
+        }
+      },
+      "light_slash": {
+        "cancelWindows": [
+          {
+            "cost": {
+              "ap": 0,
+              "apGain": null,
+              "focus": 3,
+              "stamina": 0
+            },
+            "from": 6,
+            "gate": "ON_HIT",
+            "into": [
+              "special_riposte"
+            ],
+            "to": 11
+          }
+        ],
+        "cost": {
+          "ap": 1,
+          "apGain": {
+            "amount": 1,
+            "gate": "ON_HIT"
+          },
+          "focus": 0,
+          "stamina": 5
+        },
+        "hitEffect": {
+          "blockstun": 5,
+          "chipDamage": 0,
+          "damage": 10,
+          "hitstun": 9,
+          "knockback": 65536,
+          "knockdown": false,
+          "launches": false
+        },
+        "level": "MID",
+        "properties": [],
+        "reach": {
+          "advance": 0,
+          "heightHigh": 131072,
+          "heightLow": 0,
+          "lateralBand": 32768,
+          "maxRange": 131072,
+          "minRange": 0,
+          "stepIn": 0,
+          "trackSide": 0
+        },
+        "startupCancelable": false,
+        "timing": {
+          "active": 2,
+          "recovery": 6,
+          "startup": 4
+        }
+      },
+      "sidestep_l": {
+        "cancelWindows": [],
+        "cost": {
+          "ap": 0,
+          "apGain": null,
+          "focus": 0,
+          "stamina": 4
+        },
+        "hitEffect": {
+          "blockstun": 0,
+          "chipDamage": 0,
+          "damage": 0,
+          "hitstun": 0,
+          "knockback": 0,
+          "knockdown": false,
+          "launches": false
+        },
+        "level": "MID",
+        "motion": {
+          "lane": 0,
+          "offset": -65536
+        },
+        "properties": [],
+        "reach": {
+          "advance": 0,
+          "heightHigh": 131072,
+          "heightLow": 0,
+          "lateralBand": 65536,
+          "maxRange": 0,
+          "minRange": 0,
+          "stepIn": 0,
+          "trackSide": 0
+        },
+        "startupCancelable": false,
+        "timing": {
+          "active": 2,
+          "recovery": 7,
+          "startup": 3
+        }
+      },
+      "sidestep_r": {
+        "cancelWindows": [],
+        "cost": {
+          "ap": 0,
+          "apGain": null,
+          "focus": 0,
+          "stamina": 4
+        },
+        "hitEffect": {
+          "blockstun": 0,
+          "chipDamage": 0,
+          "damage": 0,
+          "hitstun": 0,
+          "knockback": 0,
+          "knockdown": false,
+          "launches": false
+        },
+        "level": "MID",
+        "motion": {
+          "lane": 0,
+          "offset": 65536
+        },
+        "properties": [],
+        "reach": {
+          "advance": 0,
+          "heightHigh": 131072,
+          "heightLow": 0,
+          "lateralBand": 65536,
+          "maxRange": 0,
+          "minRange": 0,
+          "stepIn": 0,
+          "trackSide": 0
+        },
+        "startupCancelable": false,
+        "timing": {
+          "active": 2,
+          "recovery": 7,
+          "startup": 3
+        }
+      },
+      "special_riposte": {
+        "cancelWindows": [],
+        "cost": {
+          "ap": 2,
+          "apGain": null,
+          "focus": 5,
+          "stamina": 0
+        },
+        "hitEffect": {
+          "blockstun": 0,
+          "chipDamage": 0,
+          "damage": 20,
+          "hitstun": 18,
+          "knockback": 131072,
+          "knockdown": false,
+          "launches": true
+        },
+        "level": "MID",
+        "properties": [],
+        "reach": {
+          "advance": 0,
+          "heightHigh": 131072,
+          "heightLow": 0,
+          "lateralBand": 65536,
+          "maxRange": 131072,
+          "minRange": 0,
+          "stepIn": 0,
+          "trackSide": 0
+        },
+        "startupCancelable": false,
+        "timing": {
+          "active": 3,
+          "recovery": 10,
+          "startup": 6
+        }
+      },
+      "throw_grab": {
+        "cancelWindows": [],
+        "cost": {
+          "ap": 1,
+          "apGain": null,
+          "focus": 0,
+          "stamina": 8
+        },
+        "hitEffect": {
+          "blockstun": 0,
+          "chipDamage": 0,
+          "damage": 18,
+          "hitstun": 20,
+          "knockback": 0,
+          "knockdown": true,
+          "launches": false
+        },
+        "level": "THROW",
+        "properties": [],
+        "reach": {
+          "advance": 0,
+          "heightHigh": 131072,
+          "heightLow": 0,
+          "lateralBand": 65536,
+          "maxRange": 65536,
+          "minRange": 0,
+          "stepIn": 0,
+          "trackSide": 0
+        },
+        "startupCancelable": false,
+        "timing": {
+          "active": 2,
+          "recovery": 8,
+          "startup": 5
+        }
+      }
+    }
+  ],
+  "options": {
+    "maxDecisions": 30,
+    "maxTicks": 200
+  },
+  "schemaVersion": 1,
+  "trace": [
+    {
+      "entities": [
+        {
+          "ap": 3,
+          "focus": 20,
+          "hp": 100,
+          "id": "Borin",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 0,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        },
+        {
+          "ap": 5,
+          "focus": 20,
+          "hp": 100,
+          "id": "Reza",
+          "offset": 0,
+          "poise": 30,
+          "pos": 65536,
+          "readyTick": 0,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "NEUTRAL",
+      "t": 0
+    },
+    {
+      "entity": 0,
+      "kind": "COMMIT",
+      "moveId": "tempo_jab",
+      "t": 0
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 0
+    },
+    {
+      "entities": [
+        {
+          "ap": 2,
+          "focus": 20,
+          "hp": 100,
+          "id": "Borin",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 13,
+          "stamina": 94,
+          "stateTag": "STARTUP"
+        },
+        {
+          "ap": 5,
+          "focus": 20,
+          "hp": 100,
+          "id": "Reza",
+          "offset": 0,
+          "poise": 30,
+          "pos": 65536,
+          "readyTick": 1,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "PRESSURE",
+      "t": 1
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 1
+    },
+    {
+      "entities": [
+        {
+          "ap": 2,
+          "focus": 20,
+          "hp": 100,
+          "id": "Borin",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 13,
+          "stamina": 94,
+          "stateTag": "STARTUP"
+        },
+        {
+          "ap": 5,
+          "focus": 20,
+          "hp": 100,
+          "id": "Reza",
+          "offset": 0,
+          "poise": 30,
+          "pos": 65536,
+          "readyTick": 2,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "PRESSURE",
+      "t": 2
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 2
+    },
+    {
+      "entities": [
+        {
+          "ap": 2,
+          "focus": 20,
+          "hp": 100,
+          "id": "Borin",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 13,
+          "stamina": 94,
+          "stateTag": "STARTUP"
+        },
+        {
+          "ap": 5,
+          "focus": 20,
+          "hp": 100,
+          "id": "Reza",
+          "offset": 0,
+          "poise": 30,
+          "pos": 65536,
+          "readyTick": 3,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "PRESSURE",
+      "t": 3
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 3
+    },
+    {
+      "entities": [
+        {
+          "ap": 2,
+          "focus": 20,
+          "hp": 100,
+          "id": "Borin",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 13,
+          "stamina": 94,
+          "stateTag": "STARTUP"
+        },
+        {
+          "ap": 5,
+          "focus": 20,
+          "hp": 100,
+          "id": "Reza",
+          "offset": 0,
+          "poise": 30,
+          "pos": 65536,
+          "readyTick": 4,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "PRESSURE",
+      "t": 4
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 4
+    },
+    {
+      "entities": [
+        {
+          "ap": 2,
+          "focus": 20,
+          "hp": 100,
+          "id": "Borin",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 13,
+          "stamina": 94,
+          "stateTag": "STARTUP"
+        },
+        {
+          "ap": 5,
+          "focus": 20,
+          "hp": 100,
+          "id": "Reza",
+          "offset": 0,
+          "poise": 30,
+          "pos": 65536,
+          "readyTick": 5,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "PRESSURE",
+      "t": 5
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 5
+    },
+    {
+      "attacker": 0,
+      "counter": false,
+      "defender": 1,
+      "kind": "CONTACT",
+      "result": "HIT",
+      "t": 5
+    },
+    {
+      "entity": 0,
+      "into": "homing_sweep",
+      "kind": "CANCEL",
+      "t": 8
+    },
+    {
+      "attacker": 0,
+      "counter": false,
+      "defender": 1,
+      "kind": "CONTACT",
+      "result": "HIT",
+      "t": 16
+    },
+    {
+      "entity": 0,
+      "kind": "DENIED",
+      "moveId": "heavy_cleave",
+      "t": 20
+    },
+    {
+      "entities": [
+        {
+          "ap": 3,
+          "focus": 12,
+          "hp": 100,
+          "id": "Borin",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 31,
+          "stamina": 94,
+          "stateTag": "NEUTRAL"
+        },
+        {
+          "ap": 5,
+          "focus": 20,
+          "hp": 74,
+          "id": "Reza",
+          "offset": 0,
+          "poise": 30,
+          "pos": 262144,
+          "readyTick": 31,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "NEUTRAL",
+      "t": 31
+    },
+    {
+      "entity": 0,
+      "kind": "WAIT",
+      "t": 31
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 31
+    },
+    {
+      "entities": [
+        {
+          "ap": 3,
+          "focus": 12,
+          "hp": 100,
+          "id": "Borin",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 32,
+          "stamina": 95,
+          "stateTag": "NEUTRAL"
+        },
+        {
+          "ap": 5,
+          "focus": 20,
+          "hp": 74,
+          "id": "Reza",
+          "offset": 0,
+          "poise": 30,
+          "pos": 262144,
+          "readyTick": 32,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "NEUTRAL",
+      "t": 32
+    },
+    {
+      "entity": 0,
+      "kind": "WAIT",
+      "t": 32
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 32
+    },
+    {
+      "entities": [
+        {
+          "ap": 3,
+          "focus": 12,
+          "hp": 100,
+          "id": "Borin",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 33,
+          "stamina": 96,
+          "stateTag": "NEUTRAL"
+        },
+        {
+          "ap": 5,
+          "focus": 20,
+          "hp": 74,
+          "id": "Reza",
+          "offset": 0,
+          "poise": 30,
+          "pos": 262144,
+          "readyTick": 33,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "NEUTRAL",
+      "t": 33
+    },
+    {
+      "entity": 0,
+      "kind": "WAIT",
+      "t": 33
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 33
+    },
+    {
+      "entities": [
+        {
+          "ap": 3,
+          "focus": 12,
+          "hp": 100,
+          "id": "Borin",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 34,
+          "stamina": 97,
+          "stateTag": "NEUTRAL"
+        },
+        {
+          "ap": 5,
+          "focus": 20,
+          "hp": 74,
+          "id": "Reza",
+          "offset": 0,
+          "poise": 30,
+          "pos": 262144,
+          "readyTick": 34,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "NEUTRAL",
+      "t": 34
+    },
+    {
+      "entity": 0,
+      "kind": "WAIT",
+      "t": 34
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 34
+    },
+    {
+      "entities": [
+        {
+          "ap": 3,
+          "focus": 12,
+          "hp": 100,
+          "id": "Borin",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 35,
+          "stamina": 98,
+          "stateTag": "NEUTRAL"
+        },
+        {
+          "ap": 5,
+          "focus": 20,
+          "hp": 74,
+          "id": "Reza",
+          "offset": 0,
+          "poise": 30,
+          "pos": 262144,
+          "readyTick": 35,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "NEUTRAL",
+      "t": 35
+    },
+    {
+      "entity": 0,
+      "kind": "WAIT",
+      "t": 35
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 35
+    },
+    {
+      "entities": [
+        {
+          "ap": 3,
+          "focus": 12,
+          "hp": 100,
+          "id": "Borin",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 36,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        },
+        {
+          "ap": 5,
+          "focus": 20,
+          "hp": 74,
+          "id": "Reza",
+          "offset": 0,
+          "poise": 30,
+          "pos": 262144,
+          "readyTick": 36,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "NEUTRAL",
+      "t": 36
+    },
+    {
+      "entity": 0,
+      "kind": "WAIT",
+      "t": 36
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 36
+    },
+    {
+      "entities": [
+        {
+          "ap": 3,
+          "focus": 12,
+          "hp": 100,
+          "id": "Borin",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 37,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        },
+        {
+          "ap": 5,
+          "focus": 20,
+          "hp": 74,
+          "id": "Reza",
+          "offset": 0,
+          "poise": 30,
+          "pos": 262144,
+          "readyTick": 37,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "NEUTRAL",
+      "t": 37
+    },
+    {
+      "entity": 0,
+      "kind": "WAIT",
+      "t": 37
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 37
+    },
+    {
+      "entities": [
+        {
+          "ap": 3,
+          "focus": 12,
+          "hp": 100,
+          "id": "Borin",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 38,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        },
+        {
+          "ap": 5,
+          "focus": 20,
+          "hp": 74,
+          "id": "Reza",
+          "offset": 0,
+          "poise": 30,
+          "pos": 262144,
+          "readyTick": 38,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "NEUTRAL",
+      "t": 38
+    },
+    {
+      "entity": 0,
+      "kind": "WAIT",
+      "t": 38
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 38
+    },
+    {
+      "entities": [
+        {
+          "ap": 3,
+          "focus": 12,
+          "hp": 100,
+          "id": "Borin",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 39,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        },
+        {
+          "ap": 5,
+          "focus": 20,
+          "hp": 74,
+          "id": "Reza",
+          "offset": 0,
+          "poise": 30,
+          "pos": 262144,
+          "readyTick": 39,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "NEUTRAL",
+      "t": 39
+    },
+    {
+      "entity": 0,
+      "kind": "WAIT",
+      "t": 39
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 39
+    },
+    {
+      "entities": [
+        {
+          "ap": 3,
+          "focus": 12,
+          "hp": 100,
+          "id": "Borin",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 40,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        },
+        {
+          "ap": 5,
+          "focus": 20,
+          "hp": 74,
+          "id": "Reza",
+          "offset": 0,
+          "poise": 30,
+          "pos": 262144,
+          "readyTick": 40,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "NEUTRAL",
+      "t": 40
+    },
+    {
+      "entity": 0,
+      "kind": "WAIT",
+      "t": 40
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 40
+    },
+    {
+      "entities": [
+        {
+          "ap": 3,
+          "focus": 12,
+          "hp": 100,
+          "id": "Borin",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 41,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        },
+        {
+          "ap": 5,
+          "focus": 20,
+          "hp": 74,
+          "id": "Reza",
+          "offset": 0,
+          "poise": 30,
+          "pos": 262144,
+          "readyTick": 41,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "NEUTRAL",
+      "t": 41
+    },
+    {
+      "entity": 0,
+      "kind": "WAIT",
+      "t": 41
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 41
+    },
+    {
+      "entities": [
+        {
+          "ap": 3,
+          "focus": 12,
+          "hp": 100,
+          "id": "Borin",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 42,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        },
+        {
+          "ap": 5,
+          "focus": 20,
+          "hp": 74,
+          "id": "Reza",
+          "offset": 0,
+          "poise": 30,
+          "pos": 262144,
+          "readyTick": 42,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "NEUTRAL",
+      "t": 42
+    },
+    {
+      "entity": 0,
+      "kind": "WAIT",
+      "t": 42
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 42
+    },
+    {
+      "entities": [
+        {
+          "ap": 3,
+          "focus": 12,
+          "hp": 100,
+          "id": "Borin",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 43,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        },
+        {
+          "ap": 5,
+          "focus": 20,
+          "hp": 74,
+          "id": "Reza",
+          "offset": 0,
+          "poise": 30,
+          "pos": 262144,
+          "readyTick": 43,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "NEUTRAL",
+      "t": 43
+    },
+    {
+      "entity": 0,
+      "kind": "WAIT",
+      "t": 43
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 43
+    },
+    {
+      "entities": [
+        {
+          "ap": 3,
+          "focus": 12,
+          "hp": 100,
+          "id": "Borin",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 44,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        },
+        {
+          "ap": 5,
+          "focus": 20,
+          "hp": 74,
+          "id": "Reza",
+          "offset": 0,
+          "poise": 30,
+          "pos": 262144,
+          "readyTick": 44,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "NEUTRAL",
+      "t": 44
+    },
+    {
+      "entity": 0,
+      "kind": "WAIT",
+      "t": 44
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 44
+    },
+    {
+      "entities": [
+        {
+          "ap": 3,
+          "focus": 12,
+          "hp": 100,
+          "id": "Borin",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 45,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        },
+        {
+          "ap": 5,
+          "focus": 20,
+          "hp": 74,
+          "id": "Reza",
+          "offset": 0,
+          "poise": 30,
+          "pos": 262144,
+          "readyTick": 45,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "NEUTRAL",
+      "t": 45
+    },
+    {
+      "entity": 0,
+      "kind": "WAIT",
+      "t": 45
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 45
+    },
+    {
+      "entities": [
+        {
+          "ap": 3,
+          "focus": 12,
+          "hp": 100,
+          "id": "Borin",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 46,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        },
+        {
+          "ap": 5,
+          "focus": 20,
+          "hp": 74,
+          "id": "Reza",
+          "offset": 0,
+          "poise": 30,
+          "pos": 262144,
+          "readyTick": 46,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "NEUTRAL",
+      "t": 46
+    },
+    {
+      "entity": 0,
+      "kind": "WAIT",
+      "t": 46
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 46
+    },
+    {
+      "entities": [
+        {
+          "ap": 3,
+          "focus": 12,
+          "hp": 100,
+          "id": "Borin",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 47,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        },
+        {
+          "ap": 5,
+          "focus": 20,
+          "hp": 74,
+          "id": "Reza",
+          "offset": 0,
+          "poise": 30,
+          "pos": 262144,
+          "readyTick": 47,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "NEUTRAL",
+      "t": 47
+    },
+    {
+      "entity": 0,
+      "kind": "WAIT",
+      "t": 47
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 47
+    },
+    {
+      "entities": [
+        {
+          "ap": 3,
+          "focus": 12,
+          "hp": 100,
+          "id": "Borin",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 48,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        },
+        {
+          "ap": 5,
+          "focus": 20,
+          "hp": 74,
+          "id": "Reza",
+          "offset": 0,
+          "poise": 30,
+          "pos": 262144,
+          "readyTick": 48,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "NEUTRAL",
+      "t": 48
+    },
+    {
+      "entity": 0,
+      "kind": "WAIT",
+      "t": 48
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 48
+    },
+    {
+      "entities": [
+        {
+          "ap": 3,
+          "focus": 12,
+          "hp": 100,
+          "id": "Borin",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 49,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        },
+        {
+          "ap": 5,
+          "focus": 20,
+          "hp": 74,
+          "id": "Reza",
+          "offset": 0,
+          "poise": 30,
+          "pos": 262144,
+          "readyTick": 49,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "NEUTRAL",
+      "t": 49
+    },
+    {
+      "entity": 0,
+      "kind": "WAIT",
+      "t": 49
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 49
+    },
+    {
+      "entities": [
+        {
+          "ap": 3,
+          "focus": 12,
+          "hp": 100,
+          "id": "Borin",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 50,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        },
+        {
+          "ap": 5,
+          "focus": 20,
+          "hp": 74,
+          "id": "Reza",
+          "offset": 0,
+          "poise": 30,
+          "pos": 262144,
+          "readyTick": 50,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "NEUTRAL",
+      "t": 50
+    },
+    {
+      "entity": 0,
+      "kind": "WAIT",
+      "t": 50
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 50
+    },
+    {
+      "entities": [
+        {
+          "ap": 3,
+          "focus": 12,
+          "hp": 100,
+          "id": "Borin",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 51,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        },
+        {
+          "ap": 5,
+          "focus": 20,
+          "hp": 74,
+          "id": "Reza",
+          "offset": 0,
+          "poise": 30,
+          "pos": 262144,
+          "readyTick": 51,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "NEUTRAL",
+      "t": 51
+    },
+    {
+      "entity": 0,
+      "kind": "WAIT",
+      "t": 51
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 51
+    },
+    {
+      "entities": [
+        {
+          "ap": 3,
+          "focus": 12,
+          "hp": 100,
+          "id": "Borin",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 52,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        },
+        {
+          "ap": 5,
+          "focus": 20,
+          "hp": 74,
+          "id": "Reza",
+          "offset": 0,
+          "poise": 30,
+          "pos": 262144,
+          "readyTick": 52,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "NEUTRAL",
+      "t": 52
+    },
+    {
+      "entity": 0,
+      "kind": "WAIT",
+      "t": 52
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 52
+    }
+  ]
+}

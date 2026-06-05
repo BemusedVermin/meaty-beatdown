@@ -89,6 +89,11 @@ export type Action =
 
 export type DecisionResult = Action | { readonly kind: "DECLINE" };
 
+/** One recorded decision, in the order the engine asked for it (for record/replay golden vectors). */
+export type Decision =
+  | { readonly kind: "action"; readonly action: Action }
+  | { readonly kind: "cancel"; readonly result: DecisionResult };
+
 export interface EntitySnapshot {
   readonly id: string;
   readonly stateTag: string;

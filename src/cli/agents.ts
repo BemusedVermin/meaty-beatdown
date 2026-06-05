@@ -10,9 +10,12 @@ import {
   type Action,
   type Agent,
   type CancelView,
+  type Decision,
   type DecisionResult,
   type PlayerView,
 } from "../core/engine";
+
+export { type Decision } from "../core/engine";
 
 /** ScriptedAgent — fixed action/cancel lists → deterministic tests & scenarios. */
 export class ScriptedAgent implements Agent {
@@ -29,11 +32,6 @@ export class ScriptedAgent implements Agent {
     return this.cancels[this.ci++] ?? { kind: "DECLINE" };
   }
 }
-
-/** One recorded decision in the order the engine asked for it (action vs cancel). */
-export type Decision =
-  | { readonly kind: "action"; readonly action: Action }
-  | { readonly kind: "cancel"; readonly result: DecisionResult };
 
 /** RecordingAgent — wraps another agent and records its decision stream (for golden-vector emit). */
 export class RecordingAgent implements Agent {

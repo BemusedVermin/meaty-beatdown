@@ -232,3 +232,26 @@ decisions is recorded here, with its tradeoff. (The 12 locked decisions themselv
   poke → regime flip → Borin's cleave counter-hits Reza's throw startup (strike-beats-throw), rather than
   the spec's backdash-whiff-punish. Throws-beat-armor and the backdash escape are exercised by the engine
   tests / audit; the CLI scenario favors a coherent, fully-traced timeline over exact reproduction.
+
+## Phase 8 — golden vectors + PORTING.md
+
+- **DECISION: golden vectors are SELF-CONTAINED.** Each `golden/*.json` carries config + both move
+  tables (resolved FrameProfiles) + initialState + options + the recorded per-agent decision streams +
+  the expected trace, so a port replays it without the TS content. Vectors live in the repo-root
+  `golden/` data directory (npm scripts run from repo root → `process.cwd()`).
+
+- **DECISION: canonical encoding = integers-only (asserted), key-sorted, LF.** `canonicalJson` walks the
+  structure and THROWS on any non-integer number (catching a float leaking onto the wire), recursively
+  sorts keys, emits 2-space-indent JSON + trailing LF. Fixed-point serializes as its raw integer (a
+  Fixed IS its raw). Emit is idempotent (byte-identical re-runs) — the determinism guarantee made visible.
+
+- **DECISION: `Decision` type moved to core/engine.ts.** serialize/ may not import cli/ (boundary rule),
+  but needed the recorded-decision type; it is engine-adjacent, so it lives in engine.ts and cli/agents
+  re-exports it.
+
+- **DECISION: verify replays with v.options and live CONFIG.** The vector stores its run options (so the
+  ReplayAgent is asked exactly the recorded number of decisions) and the config (for the porter); the TS
+  verify replays through the LIVE engine, so an intended behavior/CONFIG change makes vectors mismatch →
+  re-`emit` to re-baseline. `golden:verify` = `vitest run golden` (the wired test); `verify.ts` is a
+  standalone tsx report. A sidestep-vs-LINEAR "interaction" is the ABSENCE of a contact event (the move
+  whiffs) — still a deterministic, verifiable trace.

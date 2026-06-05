@@ -1,0 +1,655 @@
+{
+  "config": {
+    "ap": {
+      "AP_BASE": 3,
+      "REFILL_TO_MAX": true,
+      "TEMPO_TIER_THRESHOLDS": [
+        1,
+        3,
+        5
+      ]
+    },
+    "combat": {
+      "CH_DAMAGE_MULT": 81920,
+      "CH_HITSTUN_BONUS": 6,
+      "GUARD_BREAK_STUN_TICKS": 40,
+      "JUGGLE_DAMAGE_DECAY": 58982,
+      "PARRY_AP_REFUND": 2,
+      "PARRY_FOCUS_REFUND": 1,
+      "PARRY_FREEZE_TICKS": 30,
+      "PARRY_RECOVER_TICKS": 4,
+      "THROW_TECH_RECOVER_TICKS": 8
+    },
+    "combo": {
+      "HITSTUN_DECAY_PER_HIT": 2,
+      "MIN_HITSTUN": 1
+    },
+    "features": {
+      "DAMAGE_VARIANCE": false,
+      "STARTUP_CANCELABLE_BY_DEFAULT": false,
+      "THROWS_BEAT_ARMOR": true
+    },
+    "resources": {
+      "STAMINA_REGEN_PER_TICK": 1
+    },
+    "rpg": {
+      "BASE_FOCUS": 10,
+      "BASE_HP": 100,
+      "BASE_POISE": 30,
+      "BASE_STAMINA": 50,
+      "CON_HP_PER_MOD": 10,
+      "CON_POISE_PER_MOD": 3,
+      "CON_STAMINA_PER_MOD": 5,
+      "DEX_ADVANCE_PER_MOD": 1,
+      "DEX_STARTUP_REDUCTION_CAP": 3,
+      "DEX_STARTUP_REDUCTION_PER_MOD": 1,
+      "INT_FOCUS_PER_MOD": 2,
+      "MIN_STARTUP": 1,
+      "STR_ARMOR_HITS_CAP": 2,
+      "STR_ARMOR_HITS_PER_MOD": 1,
+      "STR_DAMAGE_PER_MOD": 2
+    },
+    "tick": {
+      "TICKS_PER_SECOND": 60
+    }
+  },
+  "decisions": [
+    [
+      {
+        "action": {
+          "kind": "MOVE",
+          "moveId": "poke"
+        },
+        "kind": "action"
+      }
+    ],
+    [
+      {
+        "action": {
+          "kind": "MOVE",
+          "moveId": "parry"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      },
+      {
+        "action": {
+          "kind": "WAIT"
+        },
+        "kind": "action"
+      }
+    ]
+  ],
+  "initialState": {
+    "entities": [
+      {
+        "comboCount": 0,
+        "id": "A",
+        "readyTick": 0,
+        "resources": {
+          "ap": 5,
+          "apMax": 5,
+          "focus": 20,
+          "focusMax": 20,
+          "hp": 100,
+          "hpMax": 100,
+          "poise": 30,
+          "poiseMax": 30,
+          "stamina": 99,
+          "staminaMax": 99
+        },
+        "spatial": {
+          "facing": 1,
+          "height": 65536,
+          "offset": 0,
+          "pos": 0
+        },
+        "state": {
+          "kind": "NEUTRAL"
+        }
+      },
+      {
+        "comboCount": 0,
+        "id": "B",
+        "readyTick": 0,
+        "resources": {
+          "ap": 5,
+          "apMax": 5,
+          "focus": 20,
+          "focusMax": 20,
+          "hp": 100,
+          "hpMax": 100,
+          "poise": 30,
+          "poiseMax": 30,
+          "stamina": 99,
+          "staminaMax": 99
+        },
+        "spatial": {
+          "facing": -1,
+          "height": 65536,
+          "offset": 0,
+          "pos": 65536
+        },
+        "state": {
+          "kind": "NEUTRAL"
+        }
+      }
+    ],
+    "t": 0
+  },
+  "moveTables": [
+    {
+      "poke": {
+        "cancelWindows": [],
+        "cost": {
+          "ap": 1,
+          "apGain": null,
+          "focus": 0,
+          "stamina": 4
+        },
+        "hitEffect": {
+          "blockstun": 5,
+          "chipDamage": 0,
+          "damage": 10,
+          "hitstun": 9,
+          "knockback": 65536,
+          "knockdown": false,
+          "launches": false
+        },
+        "level": "MID",
+        "properties": [],
+        "reach": {
+          "advance": 0,
+          "heightHigh": 131072,
+          "heightLow": 0,
+          "lateralBand": 32768,
+          "maxRange": 131072,
+          "minRange": 0,
+          "stepIn": 0,
+          "trackSide": 0
+        },
+        "startupCancelable": false,
+        "timing": {
+          "active": 2,
+          "recovery": 6,
+          "startup": 3
+        }
+      }
+    },
+    {
+      "parry": {
+        "cancelWindows": [],
+        "cost": {
+          "ap": 0,
+          "apGain": null,
+          "focus": 3,
+          "stamina": 0
+        },
+        "hitEffect": {
+          "blockstun": 0,
+          "chipDamage": 0,
+          "damage": 0,
+          "hitstun": 0,
+          "knockback": 0,
+          "knockdown": false,
+          "launches": false
+        },
+        "level": "MID",
+        "properties": [
+          {
+            "kind": "GUARD_POINT",
+            "window": {
+              "from": 1,
+              "to": 6
+            }
+          }
+        ],
+        "reach": {
+          "advance": 0,
+          "heightHigh": 131072,
+          "heightLow": 0,
+          "lateralBand": 65536,
+          "maxRange": 0,
+          "minRange": 0,
+          "stepIn": 0,
+          "trackSide": 0
+        },
+        "startupCancelable": false,
+        "timing": {
+          "active": 6,
+          "recovery": 12,
+          "startup": 1
+        }
+      }
+    }
+  ],
+  "options": {
+    "maxDecisions": 10,
+    "maxTicks": 150
+  },
+  "schemaVersion": 1,
+  "trace": [
+    {
+      "entities": [
+        {
+          "ap": 5,
+          "focus": 20,
+          "hp": 100,
+          "id": "A",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 0,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        },
+        {
+          "ap": 5,
+          "focus": 20,
+          "hp": 100,
+          "id": "B",
+          "offset": 0,
+          "poise": 30,
+          "pos": 65536,
+          "readyTick": 0,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "NEUTRAL",
+      "t": 0
+    },
+    {
+      "entity": 0,
+      "kind": "COMMIT",
+      "moveId": "poke",
+      "t": 0
+    },
+    {
+      "entity": 1,
+      "kind": "COMMIT",
+      "moveId": "parry",
+      "t": 0
+    },
+    {
+      "attacker": 0,
+      "counter": false,
+      "defender": 1,
+      "kind": "CONTACT",
+      "result": "PARRIED",
+      "t": 3
+    },
+    {
+      "entities": [
+        {
+          "ap": 4,
+          "focus": 20,
+          "hp": 100,
+          "id": "A",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 33,
+          "stamina": 95,
+          "stateTag": "RECOVERY"
+        },
+        {
+          "ap": 5,
+          "focus": 18,
+          "hp": 100,
+          "id": "B",
+          "offset": 0,
+          "poise": 30,
+          "pos": 65536,
+          "readyTick": 7,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "PRESSURE",
+      "t": 7
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 7
+    },
+    {
+      "entities": [
+        {
+          "ap": 4,
+          "focus": 20,
+          "hp": 100,
+          "id": "A",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 33,
+          "stamina": 95,
+          "stateTag": "RECOVERY"
+        },
+        {
+          "ap": 5,
+          "focus": 18,
+          "hp": 100,
+          "id": "B",
+          "offset": 0,
+          "poise": 30,
+          "pos": 65536,
+          "readyTick": 8,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "PRESSURE",
+      "t": 8
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 8
+    },
+    {
+      "entities": [
+        {
+          "ap": 4,
+          "focus": 20,
+          "hp": 100,
+          "id": "A",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 33,
+          "stamina": 95,
+          "stateTag": "RECOVERY"
+        },
+        {
+          "ap": 5,
+          "focus": 18,
+          "hp": 100,
+          "id": "B",
+          "offset": 0,
+          "poise": 30,
+          "pos": 65536,
+          "readyTick": 9,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "PRESSURE",
+      "t": 9
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 9
+    },
+    {
+      "entities": [
+        {
+          "ap": 4,
+          "focus": 20,
+          "hp": 100,
+          "id": "A",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 33,
+          "stamina": 95,
+          "stateTag": "RECOVERY"
+        },
+        {
+          "ap": 5,
+          "focus": 18,
+          "hp": 100,
+          "id": "B",
+          "offset": 0,
+          "poise": 30,
+          "pos": 65536,
+          "readyTick": 10,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "PRESSURE",
+      "t": 10
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 10
+    },
+    {
+      "entities": [
+        {
+          "ap": 4,
+          "focus": 20,
+          "hp": 100,
+          "id": "A",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 33,
+          "stamina": 95,
+          "stateTag": "RECOVERY"
+        },
+        {
+          "ap": 5,
+          "focus": 18,
+          "hp": 100,
+          "id": "B",
+          "offset": 0,
+          "poise": 30,
+          "pos": 65536,
+          "readyTick": 11,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "PRESSURE",
+      "t": 11
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 11
+    },
+    {
+      "entities": [
+        {
+          "ap": 4,
+          "focus": 20,
+          "hp": 100,
+          "id": "A",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 33,
+          "stamina": 96,
+          "stateTag": "NEUTRAL"
+        },
+        {
+          "ap": 5,
+          "focus": 18,
+          "hp": 100,
+          "id": "B",
+          "offset": 0,
+          "poise": 30,
+          "pos": 65536,
+          "readyTick": 12,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "PRESSURE",
+      "t": 12
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 12
+    },
+    {
+      "entities": [
+        {
+          "ap": 4,
+          "focus": 20,
+          "hp": 100,
+          "id": "A",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 33,
+          "stamina": 97,
+          "stateTag": "NEUTRAL"
+        },
+        {
+          "ap": 5,
+          "focus": 18,
+          "hp": 100,
+          "id": "B",
+          "offset": 0,
+          "poise": 30,
+          "pos": 65536,
+          "readyTick": 13,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "PRESSURE",
+      "t": 13
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 13
+    },
+    {
+      "entities": [
+        {
+          "ap": 4,
+          "focus": 20,
+          "hp": 100,
+          "id": "A",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 33,
+          "stamina": 98,
+          "stateTag": "NEUTRAL"
+        },
+        {
+          "ap": 5,
+          "focus": 18,
+          "hp": 100,
+          "id": "B",
+          "offset": 0,
+          "poise": 30,
+          "pos": 65536,
+          "readyTick": 14,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "PRESSURE",
+      "t": 14
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 14
+    },
+    {
+      "entities": [
+        {
+          "ap": 4,
+          "focus": 20,
+          "hp": 100,
+          "id": "A",
+          "offset": 0,
+          "poise": 30,
+          "pos": 0,
+          "readyTick": 33,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        },
+        {
+          "ap": 5,
+          "focus": 18,
+          "hp": 100,
+          "id": "B",
+          "offset": 0,
+          "poise": 30,
+          "pos": 65536,
+          "readyTick": 15,
+          "stamina": 99,
+          "stateTag": "NEUTRAL"
+        }
+      ],
+      "kind": "STATE",
+      "regime": "PRESSURE",
+      "t": 15
+    },
+    {
+      "entity": 1,
+      "kind": "WAIT",
+      "t": 15
+    }
+  ]
+}
