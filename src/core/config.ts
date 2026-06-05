@@ -1,0 +1,58 @@
+/**
+ * config.ts — all locked feature flags and tuning constants in one place (core/, L0).
+ *
+ * The 12 locked decisions and the spec's defaults are centralized here so a port can read the
+ * exact numbers from one file. Values that are genuinely playtest-tuned are marked TUNING; the
+ * locked design decisions are marked with their decision number.
+ *
+ * NOTE: combat multipliers are stored as `Fixed` (16.16) so damage scaling stays integer/
+ * deterministic (no float math in gameplay — decision 10). Apply them via fixed.mul then toInt.
+ */
+import { type Fixed, fromRatio } from "./fixed";
+
+export const CONFIG = {
+  /** Locked feature flags (the resolved ⚠️ forks). */
+  features: {
+    /** Decision 1: armor absorbs strikes only; throws connect through armor. */
+    THROWS_BEAT_ARMOR: true,
+    /** Decision 3: fixed damage for the prototype — no RNG is wired into damage when false. */
+    DAMAGE_VARIANCE: false,
+    /** Decision 6: a move is cancelable only from active/recovery unless it sets startupCancelable. */
+    STARTUP_CANCELABLE_BY_DEFAULT: false,
+  },
+
+  tick: {
+    /** Convention: 1 tick = 1 frame at 60 Hz (spec §0.1). Informational; the engine is tick-based. */
+    TICKS_PER_SECOND: 60,
+  },
+
+  /** Action economy / Tempo (spec §3.5; decisions 4 & 5). */
+  ap: {
+    /** Decision 5: AP_max = AP_BASE + tempoTier. */
+    AP_BASE: 3,
+    /**
+     * Decision 5: tempoMod = roundHalfUp((dexMod + wisMod)/2); tempoTier = count of thresholds ≤ tempoMod.
+     * TUNING — playtest curve. With these thresholds a strong DEX+WIS build (tempoMod ≥ 3) reaches
+     * tier 2 → AP_max 5, matching the spec's worked-example "tempo" variant.
+     */
+    TEMPO_TIER_THRESHOLDS: [1, 3, 5] as const,
+    /** spec §3.5.1: ap_refill default = AP_max each time initiative is (re)gained. */
+    REFILL_TO_MAX: true,
+  },
+
+  /** Combat resolution constants (spec §2.7, §2.8; decision 7). */
+  combat: {
+    /** spec §2.7: counter-hit damage ×1.25. */
+    CH_DAMAGE_MULT: fromRatio(5, 4) as Fixed,
+    /** spec §2.7: counter-hit +6 ticks of hitstun. */
+    CH_HITSTUN_BONUS: 6,
+    /** spec §2.8: juggle damage decay ×0.9 per successive juggle hit (0.9^n). */
+    JUGGLE_DAMAGE_DECAY: fromRatio(9, 10) as Fixed,
+    /** Decision 7 / spec §2.6: parry refunds a small amount of Focus on success. TUNING. */
+    PARRY_FOCUS_REFUND: 1,
+    /** Decision 7 / spec §3.5.2: parry refunds AP on success (ON_PARRY +2). TUNING. */
+    PARRY_AP_REFUND: 2,
+  },
+} as const;
+
+export type Config = typeof CONFIG;

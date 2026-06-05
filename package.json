@@ -1,0 +1,32 @@
+{
+  "name": "tick-engine",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Headless, deterministic combat + RPG engine (spec: docs/frame_rpg_spec.md). A disposable TypeScript prototype whose durable deliverables are the design, a portable fixed-point core, and a language-neutral golden-vector contract.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "depcruise": "depcruise src --config .dependency-cruiser.cjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "fight": "tsx src/cli/fight.ts",
+    "audit": "tsx src/balance/audit.ts",
+    "golden:emit": "tsx src/golden/emit.ts",
+    "golden:verify": "vitest run golden",
+    "check": "npm run typecheck && npm run lint && npm run depcruise && npm run test"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.18.0",
+    "@types/node": "^22.19.19",
+    "dependency-cruiser": "^16.9.0",
+    "eslint": "^9.18.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.21.0",
+    "vitest": "^3.0.4"
+  }
+}
