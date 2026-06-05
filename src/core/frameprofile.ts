@@ -17,6 +17,7 @@
 import { type Fixed, compare } from "./fixed";
 import { type Ticks } from "./tick";
 import { type ReachProfile, type Motion } from "./spatial-types";
+import { type ResourceCost, type CancelWindow } from "./cost";
 
 // ---------------------------------------------------------------------------
 // Levels & directions (fieldless enumerations → string-literal unions; map to Rust fieldless enums)
@@ -80,8 +81,6 @@ export type Property =
   /** A held blocking stance covering the listed levels (spec §2.5). A strike whose level is covered
    *  is BLOCKED; an uncovered level (the mixup) is a clean hit. Throws beat block (spec §2.6). */
   | { readonly kind: "BLOCK"; readonly covers: readonly MoveLevel[]; readonly window: Window }
-  /** Marks a window where cancels are legal (gating handled in L3 — spec §0.3, §3.4). */
-  | { readonly kind: "CANCELABLE"; readonly window: Window }
   /** Entity is launched / juggle-state during the window (spec §0.3, §2.8). */
   | { readonly kind: "AIRBORNE"; readonly window: Window }
   /** Emits an independent timeline entity. DEFERRED (decision 8 / spec §2.9): data slot kept; the
@@ -96,7 +95,6 @@ export function propertyWindow(p: Property): Window {
     case "COUNTER_HIT_STATE":
     case "GUARD_POINT":
     case "BLOCK":
-    case "CANCELABLE":
     case "AIRBORNE":
     case "PROJECTILE_SPAWN":
       return p.window;
@@ -155,11 +153,14 @@ export interface FrameProfile {
   readonly level: MoveLevel;
   /** Spatial footprint the engine feeds to spatial/lane.ts `doesHit` (spec §1.2). */
   readonly reach: ReachProfile;
+  /** What committing this move costs / refunds — AP tempo + Stamina + Focus (spec §3.1, §3.5). */
+  readonly cost: ResourceCost;
+  /** Cancel windows: where this move may cancel into others, with gate + targets + cost (spec §3.4). */
+  readonly cancelWindows: readonly CancelWindow[];
   /** Decision 6: a move is cancelable only from active/recovery unless this is true (spec §2.10). */
   readonly startupCancelable: boolean;
   /** Repositioning of the entity (movement moves). Omitted for moves that don't reposition. */
   readonly motion?: Motion;
-  // readonly cancelWindows / cost     ← added Phase 4 (L3, moves/)
 }
 
 /** on_hit advantage (invariant I-1): defender hitstun − attacker recovery. Can be ± (spec §0.2). */
@@ -212,6 +213,16 @@ export function checkFrameProfile(fp: FrameProfile): readonly string[] {
   const r = fp.reach;
   if (compare(r.minRange, r.maxRange) > 0) problems.push(`reach minRange must be ≤ maxRange`);
   if (compare(r.heightLow, r.heightHigh) > 0) problems.push(`reach heightLow must be ≤ heightHigh`);
+
+  for (const cw of fp.cancelWindows) {
+    if (cw.from < 0) problems.push(`cancel window.from must be ≥ 0 (got ${cw.from})`);
+    if (cw.to < cw.from) problems.push(`cancel window.to (${cw.to}) must be ≥ from (${cw.from})`);
+    if (cw.to > total - 1)
+      problems.push(`cancel window.to (${cw.to}) exceeds last frame index ${total - 1}`);
+    if (cw.cost.ap < 0) problems.push(`cancel cost.ap must be ≥ 0 (got ${cw.cost.ap})`);
+  }
+
+  if (fp.cost.ap < 0) problems.push(`cost.ap must be ≥ 0 (got ${fp.cost.ap})`);
 
   return problems;
 }

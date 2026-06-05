@@ -124,3 +124,39 @@ decisions is recorded here, with its tradeoff. (The 12 locked decisions themselv
 - **DECISION: PROJECTILE_SPAWN is a throwing stub (decision 8).** The Property kind + data slot exist,
   but `guardNoProjectile` throws if a PROJECTILE_SPAWN window ever goes active, so a move that actually
   spawns one fails loudly rather than silently no-op'ing. The projectile entity is deferred (spec §2.9).
+
+## Phase 4 — L3 moves/resources/economy
+
+- **DECISION: AP refills ONLY on entering NEUTRAL, not on every actionable transition.** Refilling to
+  AP_max whenever an entity becomes actionable would mask the parry AP refund (decision 7) and make all
+  conditional `ap_gain` pointless (always capped to max). Instead a fresh exchange (NEUTRAL regime)
+  refills the turn budget; in PRESSURE you act with your CURRENT AP, so conditional gains (parry +2,
+  ON_HIT links) genuinely extend offense — which is the whole point of the tempo model (spec §3.5). The
+  ⚠️ "ap_refill = AP_max vs carryover" fork is resolved this way for the prototype.
+
+- **DECISION: removed the `CANCELABLE` Property; `cancelWindows` (spec §3.4) is the single source of
+  truth for cancels.** The Property and the richer CancelWindow were redundant. The engine drives cancel
+  checkpoints off `FrameProfile.cancelWindows` (from/to/gate/into/cost). Hit-confirm windows are authored
+  in RECOVERY so the contact is settled when the edge-triggered checkpoint evaluates its gate.
+
+- **DECISION: a cancel charges `window.cost + target.cost`.** Each chained action pays its own ap_cost
+  (tempo) AND the cancel window's cost (the combo tax, usually Focus). Unaffordable ⇒ the cancel is
+  refused and the string ends (governors 1 & 4). `apGain` is the target move's, applied on its contact.
+
+- **DECISION: cost/cancel TYPES + resource OPS live in core; `moves/` holds authoring + the static
+  linter.** `core/cost.ts` (ResourceCost, ApGain, CancelWindow) and `core/resource-ops.ts` (spend/gain/
+  refill/regen) are engine-interpreted, so core. `moves/move.ts` = Move/MoveList authoring; `moves/
+  resources.ts` = the four-meter model + a re-export facade; `moves/economy.ts` = the R-5 cancel-graph
+  linter + governor report. Extracted `core/ids.ts` (MoveId/EntityId) as a leaf so cost.ts can name a
+  MoveId without an entity↔frameprofile↔cost cycle.
+
+- **DECISION: R-5 = no non-negative simple cycle in the cancel graph (sum of net AP ≥ 0).** `netAp(move)
+  = apGain − apCost`; `findPositiveApCycles` enumerates simple cycles (anchored at each cycle's smallest
+  member) and flags any whose summed net AP ≥ 0. This is the rigorous "scan for positive-weight cycles"
+  (audit C-10), stronger than the spec's per-move shorthand. `CancelWindow.into` is an explicit MoveId
+  list; the spec's CATEGORY shorthand is deferred.
+
+- **DECISION: hitstun decay via a per-entity `comboCount` (governor 3).** A hit on an already-stunned
+  defender increments comboCount; `effectiveHitstun(base, comboCount)` subtracts HITSTUN_DECAY_PER_HIT
+  per extra hit (floored at MIN_HITSTUN) so chained advantage eventually goes minus and the combo must
+  end. comboCount resets when the defender becomes actionable (the combo dropped).

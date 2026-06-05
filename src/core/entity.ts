@@ -15,10 +15,9 @@ import { type Tick, type Ticks } from "./tick";
 import { type FrameProfile, totalFrames } from "./frameprofile";
 import { type SpatialState } from "./spatial-types";
 import { assertNever } from "./assert-never";
+import { type EntityId, type MoveId } from "./ids";
 
-/** Stable identifiers (strings keep golden vectors human-readable; a port may use ints). */
-export type EntityId = string;
-export type MoveId = string;
+export { type EntityId, type MoveId } from "./ids";
 
 // ---------------------------------------------------------------------------
 // Resources (spec §3.1) — the pools the entity owns. Economy/regen logic lives in moves/ (Phase 4).
@@ -154,6 +153,8 @@ export interface Entity {
   readonly resources: Resources;
   /** Position on the lane + sidestep offset + height + facing (spec §0.4, §1.1). */
   readonly spatial: SpatialState;
+  /** Consecutive hits taken without acting — drives hitstun decay (governor 3, spec §3.4). */
+  readonly comboCount: number;
   // readonly statusEffects: ...      ← added Phase 3+
 }
 

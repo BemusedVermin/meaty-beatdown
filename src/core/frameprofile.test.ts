@@ -92,7 +92,6 @@ describe("property windows resolve at the correct ticks", () => {
       { kind: "COUNTER_HIT_STATE", window: { from: 0, to: 1 } },
       { kind: "GUARD_POINT", window: { from: 2, to: 5 } },
       { kind: "BLOCK", covers: ["HIGH", "MID"], window: { from: 0, to: 30 } },
-      { kind: "CANCELABLE", window: { from: 4, to: 5 } },
       { kind: "AIRBORNE", window: { from: 0, to: 9 } },
       { kind: "PROJECTILE_SPAWN", window: { from: 3, to: 3 } },
     ];
@@ -116,7 +115,7 @@ describe("checkFrameProfile — surrounding consistency invariants", () => {
   it("flags a property window that exceeds the move's frame span", () => {
     const fp = makeProfile({
       timing: { startup: 4, active: 2, recovery: 6 }, // total 12 → last index 11
-      properties: [{ kind: "CANCELABLE", window: { from: 4, to: 20 } }],
+      properties: [{ kind: "AIRBORNE", window: { from: 4, to: 20 } }],
     });
     const problems = checkFrameProfile(fp);
     expect(problems.some((p) => p.includes("exceeds last frame index 11"))).toBe(true);
@@ -125,7 +124,7 @@ describe("checkFrameProfile — surrounding consistency invariants", () => {
   it("flags non-positive active and inverted windows", () => {
     const fp = makeProfile({
       timing: { startup: 4, active: 0, recovery: 6 },
-      properties: [{ kind: "CANCELABLE", window: { from: 5, to: 2 } }],
+      properties: [{ kind: "AIRBORNE", window: { from: 5, to: 2 } }],
     });
     const problems = checkFrameProfile(fp);
     expect(problems.some((p) => p.includes("active must be ≥ 1"))).toBe(true);

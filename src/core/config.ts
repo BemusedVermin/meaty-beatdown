@@ -61,6 +61,20 @@ export const CONFIG = {
     /** Stun ticks of a guard break (a long, fully-punishable stun — spec §2.5). TUNING. */
     GUARD_BREAK_STUN_TICKS: 40,
   },
+
+  /** Combo governors (spec §2.8, §3.4). */
+  combo: {
+    /** Governor 3: each successive combo hit reduces effective hitstun by this many ticks. TUNING. */
+    HITSTUN_DECAY_PER_HIT: 2,
+    /** Floor on effective hitstun so a combo hit still connects but eventually goes minus. TUNING. */
+    MIN_HITSTUN: 1,
+  },
+
+  /** Resource regeneration (spec §3.1). */
+  resources: {
+    /** Stamina regained per tick while NOT executing a move (spec §3.1). TUNING. */
+    STAMINA_REGEN_PER_TICK: 1,
+  },
 } as const;
 
 export type Config = typeof CONFIG;

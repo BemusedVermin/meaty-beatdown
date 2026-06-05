@@ -42,7 +42,18 @@ import {
   counterHitDamage,
   counterHitHitstun,
   juggleScaledDamage,
+  effectiveHitstun,
 } from "./resolver";
+import { type CancelWindow, type CancelGate, type ApGain } from "./cost";
+import {
+  canAfford,
+  spend,
+  combineCost,
+  gainAp,
+  gainFocus,
+  refillAp,
+  regenStamina,
+} from "./resource-ops";
 import { CONFIG } from "./config";
 import { assertNever } from "./assert-never";
 import { doesHit } from "../spatial/lane";
@@ -248,6 +259,18 @@ function commitMove(
   });
 }
 
+/**
+ * Reduce an agent's chosen action to what actually happens: a MOVE the entity cannot afford (or that
+ * is not in its table) degrades to WAIT. This is how AP/Stamina/Focus exhaustion ends a string
+ * (governors 1 & 4) — the next action simply can't be paid for. Resolved against the pre-commit state.
+ */
+function resolveAction(s: MatchState, i: EntityIndex, action: Action, table: MoveTable): Action {
+  if (action.kind === "WAIT") return action;
+  const profile = table.get(action.moveId);
+  if (!profile || !canAfford(s.entities[i].resources, profile.cost)) return { kind: "WAIT" };
+  return action;
+}
+
 function commitAction(
   s: MatchState,
   i: EntityIndex,
@@ -260,8 +283,13 @@ function commitAction(
       const e = s.entities[i];
       return setEntity(s, i, { ...e, state: { kind: "NEUTRAL" }, readyTick: t + 1 });
     }
-    case "MOVE":
-      return commitMove(s, i, action.moveId, table, t);
+    case "MOVE": {
+      const profile = table.get(action.moveId);
+      if (!profile) throw new Error(`unknown move "${action.moveId}" for entity ${i}`);
+      const e = s.entities[i];
+      const spent = setEntity(s, i, { ...e, resources: spend(e.resources, profile.cost) });
+      return commitMove(spent, i, action.moveId, table, t);
+    }
     default:
       return assertNever(action);
   }
@@ -315,7 +343,6 @@ function defenderContextAt(d: Entity, t: Tick): DefenderContext {
         case "COUNTER_HIT_STATE":
           counterHitState = true;
           break;
-        case "CANCELABLE":
         case "AIRBORNE":
         case "PROJECTILE_SPAWN":
           break;
@@ -388,13 +415,17 @@ function applyContact(s: MatchState, c: PendingContact, t: Tick): Applied {
       let ns = setEntity(s, ai, { ...s.entities[ai], readyTick: t + CONFIG.combat.PARRY_FREEZE_TICKS });
       ns = markConnected(ns, ai, "NONE");
       const d = ns.entities[di];
-      const focus = Math.min(d.resources.focus + CONFIG.combat.PARRY_FOCUS_REFUND, d.resources.focusMax);
-      const ap = Math.min(d.resources.ap + CONFIG.combat.PARRY_AP_REFUND, d.resources.apMax);
+      // Decision 7 / spec §3.5.2: a read-based parry refunds both Focus and AP, turning defense into
+      // a long punish turn.
+      const refunded = gainAp(
+        gainFocus(d.resources, CONFIG.combat.PARRY_FOCUS_REFUND),
+        CONFIG.combat.PARRY_AP_REFUND,
+      );
       ns = setEntity(ns, di, {
         ...d,
         state: { kind: "NEUTRAL" },
         readyTick: t + CONFIG.combat.PARRY_RECOVER_TICKS,
-        resources: { ...d.resources, focus, ap },
+        resources: refunded,
       });
       return { state: ns, events: [contactEvent(false)] };
     }
@@ -459,17 +490,22 @@ function applyContact(s: MatchState, c: PendingContact, t: Tick): Applied {
 
     case "HIT": {
       let d = s.entities[di];
+      const wasInStun =
+        d.state.kind === "HITSTUN" || d.state.kind === "BLOCKSTUN" || d.state.kind === "AIRBORNE";
+      const combo = wasInStun ? d.comboCount + 1 : 1; // governor 3: hitstun decays as combo grows
       let dmg: number;
       let nextState: EntityState;
 
       if (d.state.kind === "AIRBORNE") {
         const jc = d.state.juggleCount;
-        dmg = juggleScaledDamage(he.damage, jc);
-        nextState = { kind: "AIRBORNE", until: postActive + he.hitstun, juggleCount: jc + 1 };
+        dmg = juggleScaledDamage(he.damage, jc); // governor 2: juggle damage decay
+        const stun = effectiveHitstun(he.hitstun, combo);
+        nextState = { kind: "AIRBORNE", until: postActive + stun, juggleCount: jc + 1 };
       } else {
         const counter = result.counter;
+        const baseStun = counter ? counterHitHitstun(he.hitstun) : he.hitstun;
+        const stun = effectiveHitstun(baseStun, combo);
         dmg = counter ? counterHitDamage(he.damage) : he.damage;
-        const stun = counter ? counterHitHitstun(he.hitstun) : he.hitstun;
         const until = postActive + stun;
         nextState = he.launches
           ? { kind: "AIRBORNE", until, juggleCount: 0 }
@@ -480,7 +516,13 @@ function applyContact(s: MatchState, c: PendingContact, t: Tick): Applied {
 
       const pushedPos = applyKnockback(d.spatial.pos, attackerPos, he.knockback);
       d = damage(d, dmg);
-      d = { ...d, state: nextState, readyTick: stunUntil(nextState), spatial: { ...d.spatial, pos: pushedPos } };
+      d = {
+        ...d,
+        state: nextState,
+        readyTick: stunUntil(nextState),
+        spatial: { ...d.spatial, pos: pushedPos },
+        comboCount: combo,
+      };
       let ns = setEntity(s, di, d);
       ns = markConnected(ns, ai, "HIT");
       return { state: ns, events: [contactEvent(result.counter), ...koEvents(d)] };
@@ -563,25 +605,79 @@ function refreshPhaseLabels(s: MatchState, t: Tick): MatchState {
   return ns;
 }
 
-function cancelEligible(e: Entity, t: Tick): boolean {
+/** Whether a cancel window's gate is satisfied by the move's settled contact (hit-confirm — §2.10). */
+function cancelGateSatisfied(gate: CancelGate, contact: MoveContact): boolean {
+  switch (gate) {
+    case "ALWAYS":
+      return true;
+    case "ON_HIT":
+      return contact === "HIT";
+    case "ON_BLOCK":
+      return contact === "BLOCK";
+    case "ON_CONTACT":
+      return contact === "HIT" || contact === "BLOCK";
+    case "ON_WHIFF":
+      return contact === "NONE";
+    default:
+      return assertNever(gate);
+  }
+}
+
+/** Whether a move's conditional AP gain fires for a given contact result (spec §3.5.2). */
+function apGainTriggered(gain: ApGain, result: ContactResult): boolean {
+  switch (gain.gate) {
+    case "ALWAYS":
+      return true;
+    case "ON_HIT":
+      return result.kind === "HIT";
+    case "ON_CH":
+      return result.kind === "HIT" && result.counter;
+    case "ON_BLOCK":
+      return result.kind === "BLOCKED";
+    case "ON_PARRY":
+      return false; // the parrier's refund is applied on PARRIED via config (decision 7), not here
+    default:
+      return assertNever(gain.gate);
+  }
+}
+
+function applyApGain(s: MatchState, ai: EntityIndex, am: MoveInstance, result: ContactResult): MatchState {
+  const gain = am.profile.cost.apGain;
+  if (!gain || !apGainTriggered(gain, result)) return s;
+  const e = s.entities[ai];
+  return setEntity(s, ai, { ...e, resources: gainAp(e.resources, gain.amount) });
+}
+
+/** The cancel window an entity has just entered at tick `t` (edge-triggered, gate satisfied), or null. */
+function cancelEligible(e: Entity, t: Tick): CancelWindow | null {
   const mv = stateMove(e.state);
-  if (!mv) return false;
+  if (!mv) return null;
   const elapsed = t - mv.startTick;
   const startup = mv.profile.timing.startup;
-  for (const p of mv.profile.properties) {
-    if (p.kind !== "CANCELABLE") continue;
-    // No-startup-cancel (decision 6): unless flagged, the window's eligible start is clamped to active.
-    const firstEligible = mv.profile.startupCancelable ? p.window.from : Math.max(p.window.from, startup);
-    if (firstEligible > p.window.to) continue; // window lies entirely in startup → never offered
-    if (elapsed === firstEligible) return true; // edge-triggered once per window
+  for (const cw of mv.profile.cancelWindows) {
+    // No-startup-cancel (decision 6): unless flagged, the window's eligible start clamps to active.
+    const firstEligible = mv.profile.startupCancelable ? cw.from : Math.max(cw.from, startup);
+    if (firstEligible > cw.to) continue; // window lies entirely in startup → never offered
+    if (elapsed === firstEligible && cancelGateSatisfied(cw.gate, mv.contact)) return cw;
   }
-  return false;
+  return null;
+}
+
+/** Stamina regen for entities not currently executing a move (spec §3.1). */
+function applyRegen(s: MatchState): MatchState {
+  let ns = s;
+  for (const i of [0, 1] as const) {
+    const e = ns.entities[i];
+    if (stateMove(e.state)) continue;
+    ns = setEntity(ns, i, { ...e, resources: regenStamina(e.resources) });
+  }
+  return ns;
 }
 
 interface StepResult {
   readonly state: MatchState;
   readonly events: readonly TraceEvent[];
-  readonly cancelCheckpoint: EntityIndex | null;
+  readonly cancelCheckpoint: { readonly entity: EntityIndex; readonly window: CancelWindow } | null;
 }
 
 function stepOneTick(s: MatchState, t: Tick): StepResult {
@@ -592,15 +688,18 @@ function stepOneTick(s: MatchState, t: Tick): StepResult {
   for (const c of collectContacts(ns, t)) {
     const applied = applyContact(ns, c, t);
     ns = applied.state;
+    ns = applyApGain(ns, c.ai, c.am, c.result); // conditional AP generation (spec §3.5.2)
     events = events.concat(applied.events);
   }
 
   ns = refreshPhaseLabels(ns, t);
+  ns = applyRegen(ns);
 
-  let cancelCheckpoint: EntityIndex | null = null;
+  let cancelCheckpoint: StepResult["cancelCheckpoint"] = null;
   for (const i of [0, 1] as const) {
-    if (cancelEligible(ns.entities[i], t)) {
-      cancelCheckpoint = i;
+    const window = cancelEligible(ns.entities[i], t);
+    if (window) {
+      cancelCheckpoint = { entity: i, window };
       break;
     }
   }
@@ -629,7 +728,12 @@ function anyActionable(s: MatchState): boolean {
   return s.entities[0].readyTick <= s.t || s.entities[1].readyTick <= s.t;
 }
 
-/** Transition every now-actionable entity to NEUTRAL, re-centering offset and auto-facing (§1.1). */
+/**
+ * Transition every now-actionable entity to NEUTRAL, clear its combo counter, re-center offset, and
+ * auto-face the opponent (§1.1). AP is NOT refilled here — that happens only on entering NEUTRAL (see
+ * runMatch): a fresh exchange refills the turn budget, but in PRESSURE you act with your current AP,
+ * so conditional ap_gain (parry, ON_HIT links — spec §3.5.2; decision 7) genuinely extends offense.
+ */
 function normalizeActionable(s: MatchState): MatchState {
   let ns = s;
   for (const i of [0, 1] as const) {
@@ -639,10 +743,22 @@ function normalizeActionable(s: MatchState): MatchState {
     ns = setEntity(ns, i, {
       ...e,
       state: { kind: "NEUTRAL" },
+      comboCount: 0,
       spatial: { ...e.spatial, offset: ZERO, facing: faceToward(e.spatial, opp.spatial.pos) },
     });
   }
   return ns;
+}
+
+/** Refill both entities' AP to the cap — done on entering NEUTRAL (regaining initiative, §3.5.1). */
+function refillBothAp(s: MatchState): MatchState {
+  return {
+    ...s,
+    entities: [
+      { ...s.entities[0], resources: refillAp(s.entities[0].resources) },
+      { ...s.entities[1], resources: refillAp(s.entities[1].resources) },
+    ],
+  };
 }
 
 function snapshot(e: Entity): EntitySnapshot {
@@ -681,13 +797,13 @@ function playerView(
   };
 }
 
-function cancelView(s: MatchState, i: EntityIndex, table: MoveTable): CancelView {
+function cancelView(s: MatchState, i: EntityIndex, window: CancelWindow): CancelView {
   const mv = stateMove(s.entities[i].state);
   return {
     t: s.t,
     self: snapshot(s.entities[i]),
     contact: mv ? mv.contact : "NONE",
-    cancelInto: [...table.keys()],
+    cancelInto: window.into,
   };
 }
 
@@ -697,7 +813,7 @@ function cancelView(s: MatchState, i: EntityIndex, table: MoveTable): CancelView
 
 type Pause =
   | { readonly kind: "ACTION" }
-  | { readonly kind: "CANCEL"; readonly entity: EntityIndex }
+  | { readonly kind: "CANCEL"; readonly entity: EntityIndex; readonly window: CancelWindow }
   | { readonly kind: "OVER" };
 
 function advanceUntilNextDecision(
@@ -715,7 +831,11 @@ function advanceUntilNextDecision(
     events = events.concat(stepped.events);
     if (isMatchOver(state)) return { state, pause: { kind: "OVER" }, events };
     if (stepped.cancelCheckpoint !== null)
-      return { state, pause: { kind: "CANCEL", entity: stepped.cancelCheckpoint }, events };
+      return {
+        state,
+        pause: { kind: "CANCEL", entity: stepped.cancelCheckpoint.entity, window: stepped.cancelCheckpoint.window },
+        events,
+      };
     if (anyActionable(state)) return { state, pause: { kind: "ACTION" }, events };
   }
   return { state, pause: { kind: "OVER" }, events };
@@ -747,29 +867,45 @@ export function runMatch(
         state = normalizeActionable(state);
         const regime = computeRegime(state.entities[0], state.entities[1]);
         if (regime.kind === "NEUTRAL") {
-          // §2.10 hidden simultaneous commit: both views are built from the SAME pre-reveal state.
+          // Fresh exchange ⇒ both refill their AP turn-budget (decision 4 / spec §3.5.1).
+          state = refillBothAp(state);
+          // §2.10 hidden simultaneous commit: both views are built from the SAME pre-reveal state,
+          // and both actions are resolved for affordability against it before either commits.
           const a0 = agents[0].chooseAction(playerView(state, 0, regime, tables));
           const a1 = agents[1].chooseAction(playerView(state, 1, regime, tables));
-          state = commitAction(state, 0, a0, tables[0], state.t);
-          state = commitAction(state, 1, a1, tables[1], state.t);
-          trace.push(commitTraceEvent(0, a0, state.t), commitTraceEvent(1, a1, state.t));
+          const eff0 = resolveAction(state, 0, a0, tables[0]);
+          const eff1 = resolveAction(state, 1, a1, tables[1]);
+          state = commitAction(state, 0, eff0, tables[0], state.t);
+          state = commitAction(state, 1, eff1, tables[1], state.t);
+          trace.push(commitTraceEvent(0, eff0, state.t), commitTraceEvent(1, eff1, state.t));
         } else {
           const i = regime.actor;
           const action = agents[i].chooseAction(playerView(state, i, regime, tables));
-          state = commitAction(state, i, action, tables[i], state.t);
-          trace.push(commitTraceEvent(i, action, state.t));
+          const eff = resolveAction(state, i, action, tables[i]);
+          state = commitAction(state, i, eff, tables[i], state.t);
+          trace.push(commitTraceEvent(i, eff, state.t));
         }
         break;
       }
 
       case "CANCEL": {
-        const i = advanced.pause.entity;
-        const result = agents[i].chooseCancel(cancelView(state, i, tables[i]));
-        if (result.kind === "MOVE") {
-          state = commitMove(state, i, result.moveId, tables[i], state.t);
-          trace.push({ kind: "CANCEL", t: state.t, entity: i, into: result.moveId });
+        const { entity: i, window } = advanced.pause;
+        const result = agents[i].chooseCancel(cancelView(state, i, window));
+        if (result.kind === "MOVE" && window.into.includes(result.moveId)) {
+          const target = tables[i].get(result.moveId);
+          // A cancel pays the window's cost (the combo tax, usually Focus) PLUS the target move's own
+          // cost; unaffordable ⇒ the cancel is refused and the string ends (governors 1 & 4).
+          if (target) {
+            const combined = combineCost(window.cost, target.cost);
+            const e = state.entities[i];
+            if (canAfford(e.resources, combined)) {
+              state = setEntity(state, i, { ...e, resources: spend(e.resources, combined) });
+              state = commitMove(state, i, result.moveId, tables[i], state.t);
+              trace.push({ kind: "CANCEL", t: state.t, entity: i, into: result.moveId });
+            }
+          }
         }
-        // DECLINE / WAIT at a cancel checkpoint: let the move finish (advance steps past it).
+        // DECLINE / unaffordable / invalid target at a checkpoint: the move finishes (advance steps past).
         break;
       }
 

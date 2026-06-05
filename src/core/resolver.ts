@@ -89,6 +89,16 @@ export function counterHitHitstun(baseHitstun: number): number {
 }
 
 /**
+ * Hitstun decay (combo governor 3, spec §3.4): each successive hit in a combo reduces the next hit's
+ * effective hitstun, so the chained advantage eventually goes negative and the combo MUST end.
+ * `comboCount` is 1 for the first hit (undecayed). Floored at MIN_HITSTUN so the hit still connects.
+ */
+export function effectiveHitstun(baseHitstun: number, comboCount: number): number {
+  const decayed = baseHitstun - Math.max(0, comboCount - 1) * CONFIG.combo.HITSTUN_DECAY_PER_HIT;
+  return Math.max(CONFIG.combo.MIN_HITSTUN, decayed);
+}
+
+/**
  * Juggle-scaled damage: base × (JUGGLE_DAMAGE_DECAY ^ juggleHitIndex), rounded half-up (spec §2.8).
  * The first juggle hit (index 0) is undecayed; each subsequent juggle hit decays by ×0.9 — so combos
  * terminate. The per-step `mul` floors; the final conversion rounds half-up (so 100×0.9 → 90, not 89).

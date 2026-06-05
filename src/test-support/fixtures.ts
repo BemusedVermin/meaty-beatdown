@@ -14,6 +14,7 @@ import {
   type Timing,
   type MoveLevel,
 } from "../core/frameprofile";
+import { type ResourceCost, type CancelWindow, FREE_COST } from "../core/cost";
 import {
   type ReachProfile,
   type SpatialState,
@@ -75,12 +76,18 @@ export function makeHitEffect(o: Partial<HitEffect> = {}): HitEffect {
   };
 }
 
+export function makeCost(o: Partial<ResourceCost> = {}): ResourceCost {
+  return { ...FREE_COST, ...o };
+}
+
 export interface ProfileOverrides {
   readonly timing?: Partial<Timing>;
   readonly hitEffect?: Partial<HitEffect>;
   readonly reach?: Partial<ReachProfile>;
   readonly properties?: readonly Property[];
   readonly level?: MoveLevel;
+  readonly cost?: Partial<ResourceCost>;
+  readonly cancelWindows?: readonly CancelWindow[];
   readonly startupCancelable?: boolean;
   readonly motion?: Motion;
 }
@@ -92,6 +99,8 @@ export function makeProfile(o: ProfileOverrides = {}): FrameProfile {
     reach: makeReach(o.reach),
     properties: o.properties ?? [],
     level: o.level ?? "MID",
+    cost: makeCost(o.cost),
+    cancelWindows: o.cancelWindows ?? [],
     startupCancelable: o.startupCancelable ?? false,
   };
   return o.motion ? { ...base, motion: o.motion } : base;
@@ -131,6 +140,7 @@ export function makeEntity(o: EntityOverrides = {}): Entity {
     readyTick: o.readyTick ?? 0,
     resources: makeResources(o.resources),
     spatial: makeSpatial(o.spatial),
+    comboCount: 0,
   };
 }
 

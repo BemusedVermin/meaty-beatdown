@@ -14,7 +14,7 @@ import {
   type TraceEvent,
   runMatch,
 } from "./engine";
-import { makeProfile, makeEntity } from "../test-support/fixtures";
+import { makeProfile, makeEntity, makeCost } from "../test-support/fixtures";
 
 // ---------------------------------------------------------------------------
 // A scripted agent that records the regime it sees at each chooseAction call.
@@ -199,15 +199,15 @@ describe("§2.10 — the neutral commit is hidden (no react-to-reveal)", () => {
 // ===========================================================================
 
 describe("no startup cancels unless flagged (decision 6)", () => {
-  const cancelable: readonly Property[] = [{ kind: "CANCELABLE", window: { from: 0, to: 13 } }];
   const poke2 = makeProfile({ timing: { startup: 4, active: 2, recovery: 4 }, reach: { maxRange: fromInt(0) } });
   const longMove = makeProfile({ timing: { startup: 20, active: 2, recovery: 20 }, reach: { maxRange: fromInt(0) } });
 
   const run = (startupCancelable: boolean): readonly TraceEvent[] => {
     const poke = makeProfile({
-      timing: { startup: 6, active: 2, recovery: 6 }, // total 14; CANCELABLE spans the whole move
+      timing: { startup: 6, active: 2, recovery: 6 }, // total 14; cancel window spans the whole move
       reach: { maxRange: fromInt(0) },
-      properties: cancelable,
+      // ALWAYS gate so contact (none, out of range) does not block the cancel.
+      cancelWindows: [{ from: 0, to: 13, gate: "ALWAYS", into: ["poke2"], cost: makeCost() }],
       startupCancelable,
     });
     const state: MatchState = {
@@ -234,5 +234,92 @@ describe("no startup cancels unless flagged (decision 6)", () => {
     const cancel = run(true).find((e) => e.kind === "CANCEL");
     expect(cancel).toBeDefined();
     expect(cancel!.t).toBeLessThan(6);
+  });
+});
+
+// ===========================================================================
+// Phase 4 — AP economy: exhaustion governors, conditional ap_gain, parry refund
+// ===========================================================================
+
+describe("AP/Focus economy ends a cancel string (governors 1 & 4, spec §3.5)", () => {
+  type ChainOpts = {
+    apMax?: number;
+    focusMax?: number;
+    windowCost?: Partial<import("./cost").ResourceCost>;
+    openerCost?: Partial<import("./cost").ResourceCost>;
+    apGain?: import("./cost").ApGain;
+  };
+
+  // e0 'opener' hits the locked e1, then offers an ON_HIT cancel (in recovery) into 'follow'.
+  const runChain = (o: ChainOpts): readonly TraceEvent[] => {
+    const openerCost = o.apGain
+      ? makeCost({ ...o.openerCost, apGain: o.apGain })
+      : makeCost(o.openerCost);
+    const opener = makeProfile({
+      timing: { startup: 4, active: 2, recovery: 10 }, // total 16; recovery starts at elapsed 6
+      reach: { maxRange: fromInt(2) },
+      cost: openerCost,
+      cancelWindows: [{ from: 6, to: 15, gate: "ON_HIT", into: ["follow"], cost: makeCost(o.windowCost) }],
+    });
+    const follow = makeProfile({ reach: { maxRange: fromInt(0) } });
+    const stance = makeProfile({ timing: { startup: 2, active: 40, recovery: 5 }, reach: { maxRange: fromInt(0) } });
+    const res = { ap: o.apMax ?? 99, apMax: o.apMax ?? 99, focus: o.focusMax ?? 99, focusMax: o.focusMax ?? 99 };
+    const state: MatchState = {
+      t: 0,
+      entities: [
+        makeEntity({ id: "e0", resources: res, spatial: { pos: fromInt(0), offset: fromInt(0), height: fromInt(1), facing: 1 } }),
+        makeEntity({ id: "e1", spatial: { pos: fromInt(1), offset: fromInt(0), height: fromInt(1), facing: -1 } }),
+      ],
+    };
+    const a0 = new ScriptAgent([MOVE("opener"), WAIT, WAIT], [MOVE("follow")]);
+    const a1 = new ScriptAgent([MOVE("stance"), WAIT]);
+    return runMatch(state, [table({ opener, follow }), table({ stance })], [a0, a1], OPTS).trace;
+  };
+
+  const cancelHappened = (trace: readonly TraceEvent[]): boolean => trace.some((e) => e.kind === "CANCEL");
+
+  it("AP exhaustion: the cancel is refused when AP can't pay (governor 4)", () => {
+    expect(cancelHappened(runChain({ apMax: 3, windowCost: { ap: 5 } }))).toBe(false);
+    expect(cancelHappened(runChain({ apMax: 10, windowCost: { ap: 5 } }))).toBe(true);
+  });
+
+  it("Focus exhaustion: the cancel is refused when Focus can't pay (governor 1)", () => {
+    expect(cancelHappened(runChain({ focusMax: 3, windowCost: { focus: 5 } }))).toBe(false);
+    expect(cancelHappened(runChain({ focusMax: 10, windowCost: { focus: 5 } }))).toBe(true);
+  });
+
+  it("conditional ap_gain ON_HIT restores enough AP to keep the string alive (spec §3.5.2)", () => {
+    // opener costs 4 AP; window costs 6. Without a refund, 8 − 4 = 4 < 6 → no cancel.
+    const base = { apMax: 8, openerCost: { ap: 4 }, windowCost: { ap: 6 } } as const;
+    expect(cancelHappened(runChain(base))).toBe(false);
+    // With +3 AP ON_HIT, 4 + 3 = 7 ≥ 6 → the cancel is affordable.
+    expect(cancelHappened(runChain({ ...base, apGain: { amount: 3, gate: "ON_HIT" } }))).toBe(true);
+  });
+});
+
+describe("parry refunds both Focus and AP (decision 7, spec §2.6/§3.5.2)", () => {
+  it("a successful parry tops up the parrier's Focus and AP", () => {
+    const jab = makeProfile({ timing: { startup: 2, active: 2, recovery: 10 }, reach: { maxRange: fromInt(2) } });
+    const parry = makeProfile({
+      timing: { startup: 0, active: 6, recovery: 10 },
+      reach: { maxRange: fromInt(0) }, // a stance: it does not attack
+      properties: [{ kind: "GUARD_POINT", window: { from: 0, to: 5 } }],
+      cost: makeCost({ ap: 4 }), // e1 spends 4 AP raising the parry
+    });
+    const state: MatchState = {
+      t: 0,
+      entities: [
+        makeEntity({ id: "e0", spatial: { pos: fromInt(0), offset: fromInt(0), height: fromInt(1), facing: 1 } }),
+        makeEntity({ id: "e1", resources: { focus: 0, focusMax: 10, ap: 10, apMax: 10 }, spatial: { pos: fromInt(1), offset: fromInt(0), height: fromInt(1), facing: -1 } }),
+      ],
+    };
+    const a0 = new ScriptAgent([MOVE("jab"), WAIT]);
+    const a1 = new ScriptAgent([MOVE("parry"), WAIT, WAIT]);
+    const r = runMatch(state, [table({ jab }), table({ parry })], [a0, a1], { maxTicks: 60, maxDecisions: 10 });
+
+    expect(r.trace.some((e) => e.kind === "CONTACT" && e.result === "PARRIED")).toBe(true);
+    // e1 refilled to 10 in neutral, spent 4 on the parry (→ 6), then the parry refunded +2 AP and +1 Focus.
+    expect(r.finalState.entities[1]!.resources.ap).toBe(8);
+    expect(r.finalState.entities[1]!.resources.focus).toBe(1);
   });
 });
