@@ -1,5 +1,37 @@
+# Dependencies
 node_modules/
+
+# Build / emit output (we run via tsx/vitest and never emit, but just in case)
 dist/
-coverage/
+build/
 *.tsbuildinfo
+
+# Test / tool caches and reports
+coverage/
+.vitest/
+.eslintcache
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS cruft
 .DS_Store
+Thumbs.db
+Desktop.ini
+
+# NOTE: golden/*.json are committed cross-language contract artifacts — do NOT ignore them.
