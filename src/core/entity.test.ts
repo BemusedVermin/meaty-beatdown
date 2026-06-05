@@ -25,6 +25,16 @@ const heavyCleaveProfile: FrameProfile = {
   },
   properties: [],
   level: "MID",
+  reach: {
+    minRange: fromInt(0),
+    maxRange: fromInt(4),
+    heightLow: fromInt(0),
+    heightHigh: fromInt(2),
+    advance: fromInt(1),
+    lateralBand: fromInt(1),
+    stepIn: fromInt(0),
+    trackSide: 0,
+  },
 };
 
 const move: MoveInstance = {
@@ -102,7 +112,13 @@ describe("EntityState — tagged union, exhaustive accessors (decision 11)", () 
 
 describe("isActionable — keyed off ready_tick (spec §0.4)", () => {
   it("becomes actionable at ready_tick", () => {
-    const e: Entity = { id: "reza", state: { kind: "NEUTRAL" }, readyTick: 135, resources };
+    const e: Entity = {
+      id: "reza",
+      state: { kind: "NEUTRAL" },
+      readyTick: 135,
+      resources,
+      spatial: { pos: fromInt(0), offset: fromInt(0), height: fromInt(1), facing: 1 },
+    };
     expect(isActionable(e, 134)).toBe(false);
     expect(isActionable(e, 135)).toBe(true);
     expect(isActionable(e, 200)).toBe(true);

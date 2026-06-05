@@ -14,8 +14,9 @@
  * Built up across phases: `reach: ReachProfile` is added in Phase 2 (L1); `cancelWindows` + `cost`
  * (AP) in Phase 4 (L3). Keeping those out of L0 for now keeps core a pure foundation. See NOTES.md.
  */
-import { type Fixed } from "./fixed";
+import { type Fixed, compare } from "./fixed";
 import { type Ticks } from "./tick";
+import { type ReachProfile } from "./spatial-types";
 
 // ---------------------------------------------------------------------------
 // Levels & directions (fieldless enumerations → string-literal unions; map to Rust fieldless enums)
@@ -138,7 +139,8 @@ export interface FrameProfile {
   readonly hitEffect: HitEffect;
   readonly properties: readonly Property[];
   readonly level: MoveLevel;
-  // readonly reach: ReachProfile      ← added Phase 2 (L1, spatial/lane.ts)
+  /** Spatial footprint the engine feeds to spatial/lane.ts `doesHit` (spec §1.2). */
+  readonly reach: ReachProfile;
   // readonly cancelWindows / cost     ← added Phase 4 (L3, moves/)
 }
 
@@ -188,6 +190,10 @@ export function checkFrameProfile(fp: FrameProfile): readonly string[] {
     if (w.to > total - 1)
       problems.push(`${p.kind} window.to (${w.to}) exceeds last frame index ${total - 1}`);
   }
+
+  const r = fp.reach;
+  if (compare(r.minRange, r.maxRange) > 0) problems.push(`reach minRange must be ≤ maxRange`);
+  if (compare(r.heightLow, r.heightHigh) > 0) problems.push(`reach heightLow must be ≤ heightHigh`);
 
   return problems;
 }

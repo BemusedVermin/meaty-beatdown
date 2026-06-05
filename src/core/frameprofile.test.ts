@@ -34,6 +34,16 @@ const profile = (over: {
   hitEffect: hitEffect(over.hitEffect),
   properties: over.properties ?? [],
   level: "MID",
+  reach: {
+    minRange: fromInt(0),
+    maxRange: fromInt(2),
+    heightLow: fromInt(0),
+    heightHigh: fromInt(2),
+    advance: fromInt(0),
+    lateralBand: fromInt(1),
+    stepIn: fromInt(0),
+    trackSide: 0,
+  },
 });
 
 describe("timing", () => {
@@ -148,5 +158,13 @@ describe("checkFrameProfile — surrounding consistency invariants", () => {
     const problems = checkFrameProfile(fp);
     expect(problems.some((p) => p.includes("active must be ≥ 1"))).toBe(true);
     expect(problems.some((p) => p.includes("must be ≥ from"))).toBe(true);
+  });
+
+  it("flags an inverted reach band", () => {
+    const fp: FrameProfile = {
+      ...profile(),
+      reach: { ...profile().reach, minRange: fromInt(3), maxRange: fromInt(1) },
+    };
+    expect(checkFrameProfile(fp).some((p) => p.includes("minRange must be ≤ maxRange"))).toBe(true);
   });
 });

@@ -13,6 +13,7 @@
  */
 import { type Tick, type Ticks } from "./tick";
 import { type FrameProfile, totalFrames } from "./frameprofile";
+import { type SpatialState } from "./spatial-types";
 import { assertNever } from "./assert-never";
 
 /** Stable identifiers (strings keep golden vectors human-readable; a port may use ints). */
@@ -142,7 +143,8 @@ export interface Entity {
   /** The tick at which this entity becomes actionable (spec §0.4). */
   readonly readyTick: Tick;
   readonly resources: Resources;
-  // readonly spatial: SpatialState   ← added Phase 2 (pos/offset/height/facing)
+  /** Position on the lane + sidestep offset + height + facing (spec §0.4, §1.1). */
+  readonly spatial: SpatialState;
   // readonly statusEffects: ...      ← added Phase 3+
 }
 
