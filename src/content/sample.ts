@@ -98,6 +98,7 @@ export const BORIN_MOVES: MoveList = [
     // HOMING: trackSide 0 + large stepIn realigns through a sidestep on both sides.
     reach: { maxRange: fromInt(3), stepIn: fromInt(2), trackSide: 0 },
     cost: { focus: 4, ap: 2 },
+    cancelWindows: [onHitInto(["heavy_cleave"], 11, 22, 0)], // a finisher cancel — but it costs AP
   }),
   mv("guard", "Guard", "MOVEMENT", {
     timing: { startup: 2, active: 20, recovery: 4 },

@@ -132,6 +132,20 @@ export interface Agent {
 // Trace events (integers/ids only → comparable across languages; Phase 8 canonicalizes)
 // ---------------------------------------------------------------------------
 
+/** A compact, integers-only snapshot of one entity (pos/offset are fixed-point raw). */
+export interface TraceEntity {
+  readonly id: string;
+  readonly stateTag: string;
+  readonly readyTick: Tick;
+  readonly hp: number;
+  readonly stamina: number;
+  readonly poise: number;
+  readonly focus: number;
+  readonly ap: number;
+  readonly pos: number;
+  readonly offset: number;
+}
+
 export type TraceEvent =
   | { readonly kind: "COMMIT"; readonly t: Tick; readonly entity: EntityIndex; readonly moveId: MoveId }
   | { readonly kind: "WAIT"; readonly t: Tick; readonly entity: EntityIndex }
@@ -144,7 +158,11 @@ export type TraceEvent =
       readonly counter: boolean;
     }
   | { readonly kind: "CANCEL"; readonly t: Tick; readonly entity: EntityIndex; readonly into: MoveId }
-  | { readonly kind: "KO"; readonly t: Tick; readonly loser: EntityIndex };
+  /** A chosen move could not be paid for and degraded to WAIT — AP/Stamina/Focus exhaustion (§3.5). */
+  | { readonly kind: "DENIED"; readonly t: Tick; readonly entity: EntityIndex; readonly moveId: MoveId }
+  | { readonly kind: "KO"; readonly t: Tick; readonly loser: EntityIndex }
+  /** Both entities' state at a decision point (a turn boundary) — the entity-state stream. */
+  | { readonly kind: "STATE"; readonly t: Tick; readonly regime: Regime["kind"]; readonly entities: readonly [TraceEntity, TraceEntity] };
 
 export interface MatchResult {
   readonly finalState: MatchState;
@@ -771,6 +789,30 @@ function snapshot(e: Entity): EntitySnapshot {
   };
 }
 
+function traceEntity(e: Entity): TraceEntity {
+  return {
+    id: e.id,
+    stateTag: entityStateTag(e.state),
+    readyTick: e.readyTick,
+    hp: e.resources.hp,
+    stamina: e.resources.stamina,
+    poise: e.resources.poise,
+    focus: e.resources.focus,
+    ap: e.resources.ap,
+    pos: e.spatial.pos as number,
+    offset: e.spatial.offset as number,
+  };
+}
+
+function stateEvent(s: MatchState, regime: Regime): TraceEvent {
+  return {
+    kind: "STATE",
+    t: s.t,
+    regime: regime.kind,
+    entities: [traceEntity(s.entities[0]), traceEntity(s.entities[1])],
+  };
+}
+
 function opponentSnapshot(e: Entity): OpponentSnapshot {
   const mv = stateMove(e.state);
   return {
@@ -869,6 +911,9 @@ export function runMatch(
         if (regime.kind === "NEUTRAL") {
           // Fresh exchange ⇒ both refill their AP turn-budget (decision 4 / spec §3.5.1).
           state = refillBothAp(state);
+        }
+        trace.push(stateEvent(state, regime)); // entity-state stream snapshot at this turn boundary
+        if (regime.kind === "NEUTRAL") {
           // §2.10 hidden simultaneous commit: both views are built from the SAME pre-reveal state,
           // and both actions are resolved for affordability against it before either commits.
           const a0 = agents[0].chooseAction(playerView(state, 0, regime, tables));
@@ -877,13 +922,13 @@ export function runMatch(
           const eff1 = resolveAction(state, 1, a1, tables[1]);
           state = commitAction(state, 0, eff0, tables[0], state.t);
           state = commitAction(state, 1, eff1, tables[1], state.t);
-          trace.push(commitTraceEvent(0, eff0, state.t), commitTraceEvent(1, eff1, state.t));
+          trace.push(commitTraceEvent(0, a0, eff0, state.t), commitTraceEvent(1, a1, eff1, state.t));
         } else {
           const i = regime.actor;
           const action = agents[i].chooseAction(playerView(state, i, regime, tables));
           const eff = resolveAction(state, i, action, tables[i]);
           state = commitAction(state, i, eff, tables[i], state.t);
-          trace.push(commitTraceEvent(i, eff, state.t));
+          trace.push(commitTraceEvent(i, action, eff, state.t));
         }
         break;
       }
@@ -902,6 +947,9 @@ export function runMatch(
               state = setEntity(state, i, { ...e, resources: spend(e.resources, combined) });
               state = commitMove(state, i, result.moveId, tables[i], state.t);
               trace.push({ kind: "CANCEL", t: state.t, entity: i, into: result.moveId });
+            } else {
+              // Wanted to cancel but can't pay → exhaustion ends the string (governors 1 & 4).
+              trace.push({ kind: "DENIED", t: state.t, entity: i, moveId: result.moveId });
             }
           }
         }
@@ -917,8 +965,12 @@ export function runMatch(
   return { finalState: state, trace, winner: winnerOf(state) };
 }
 
-function commitTraceEvent(i: EntityIndex, action: Action, t: Tick): TraceEvent {
-  return action.kind === "MOVE"
-    ? { kind: "COMMIT", t, entity: i, moveId: action.moveId }
+function commitTraceEvent(i: EntityIndex, chosen: Action, effective: Action, t: Tick): TraceEvent {
+  // A chosen MOVE that resolved to WAIT was unaffordable → DENIED (exhaustion), not an idle wait.
+  if (chosen.kind === "MOVE" && effective.kind === "WAIT") {
+    return { kind: "DENIED", t, entity: i, moveId: chosen.moveId };
+  }
+  return effective.kind === "MOVE"
+    ? { kind: "COMMIT", t, entity: i, moveId: effective.moveId }
     : { kind: "WAIT", t, entity: i };
 }

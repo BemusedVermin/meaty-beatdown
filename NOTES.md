@@ -206,3 +206,29 @@ decisions is recorded here, with its tradeoff. (The 12 locked decisions themselv
   band = 1.0, a single sidestep (offset ±1) lands exactly on the inclusive edge and still connects, so a
   sidestep wouldn't dodge. The sample LINEAR strikes use band 0.5 so a sidestep genuinely evades them
   (and HOMING's stepIn realigns), which is what audit C-8/C-11 verify.
+
+## Phase 7 — CLI fight-runner
+
+- **DECISION: the trace gains STATE + DENIED events (integers-only, deterministic).** STATE is a
+  per-decision snapshot of both entities (regime, hp/stamina/poise/focus/ap, pos/offset as fixed-point
+  raw) — the "entity-state stream" the golden vectors want, and what the timeline reads for AP/HP. DENIED
+  marks a chosen move/cancel that couldn't be paid for and degraded to WAIT (AP/Stamina/Focus exhaustion)
+  — distinct from an idle wait, so the addendum's "finisher runs out of AP" beat is visible. Both are
+  deterministic, so the existing determinism tests still hold.
+
+- **DECISION: scenarios are FACTORY functions, built fresh per run.** ScriptedAgent is stateful (an
+  internal index), so a shared scenario instance would replay exhausted agents on a second run (a real
+  bug caught by the scenario tests). `allScenarios()`/`scenarioById()` build fresh each call; this also
+  matters for Phase 8 (emit then verify reuse scenarios).
+
+- **DECISION: the timeline printer collapses idle ticks.** Only ticks with a COMMIT/CANCEL/CONTACT/KO/
+  DENIED are shown, so the worked-example table stays readable instead of drowning in `· wait` rows.
+
+- **DECISION: InteractiveAgent reads stdin synchronously (node:fs readSync on fd 0).** The engine asks
+  for actions synchronously (decision 12), so interactive play can't be async; the primary CLI path is
+  scripted scenarios, with interactive as a secondary edge.
+
+- **NOTE (worked example divergence):** the reza-borin scenario shows neutral → armor absorbs Reza's
+  poke → regime flip → Borin's cleave counter-hits Reza's throw startup (strike-beats-throw), rather than
+  the spec's backdash-whiff-punish. Throws-beat-armor and the backdash escape are exercised by the engine
+  tests / audit; the CLI scenario favors a coherent, fully-traced timeline over exact reproduction.
