@@ -41,8 +41,19 @@ export interface ReachProfile {
   readonly maxRange: Fixed; // outer edge of the hitbox along the lane
   readonly heightLow: Fixed; // vertical coverage (low edge)
   readonly heightHigh: Fixed; // vertical coverage (high edge)
-  readonly advance: Fixed; // how far the attacker moves along the lane during startup+active
+  readonly advance: Fixed; // how far the attacker's HITBOX reaches forward during startup+active
   readonly lateralBand: Fixed; // half-width of the hitbox on the offset axis
   readonly stepIn: Fixed; // lateral realign during the move (TRACKING/HOMING > 0; LINEAR = 0)
   readonly trackSide: -1 | 0 | 1; // which sidestep direction the move covers better (0 = both/none)
+}
+
+/**
+ * Repositioning a move applies to the ENTITY (distinct from ReachProfile.advance, which only
+ * extends the hitbox). Movement moves (step/dash/backdash/sidestep) carry a Motion; most attacks do
+ * not. Applied as a discrete hop at the first active frame (decision 9: sidestep is a hop, not a
+ * continuous sidewalk); lateral `offset` re-centers on becoming actionable (auto-facing, §1.1).
+ */
+export interface Motion {
+  readonly lane: Fixed; // signed displacement along the lane, relative to facing (+ = forward)
+  readonly offset: Fixed; // lateral (sidestep) displacement off the shared axis
 }

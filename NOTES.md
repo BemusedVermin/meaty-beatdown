@@ -75,3 +75,52 @@ decisions is recorded here, with its tradeoff. (The 12 locked decisions themselv
 - **DECISION: `Tracking` is encoded ONLY in `ReachProfile` (lateral_band/step_in/track_side, L1), not
   duplicated as a `Property`.** Keeps all contact math in `spatial/lane.ts` (audit C-7) and avoids two
   sources of truth. The spec lists Tracking in both §0.3 and §1.2; we keep the §1.2 spatial encoding.
+
+## Phase 3 — L2 engine
+
+- **DECISION: emergent frame advantage is ANCHORED to the quoted on_hit/on_block, not to the exact
+  connect frame.** On a contact at the attacker's move (started S, total = startup+active+recovery),
+  the defender's stun begins at `S + startup + active` (the first recovery tick) and lasts `stun` ticks
+  ⇒ `defenderReady = S+startup+active+stun`, while `attackerReady = S+total`. So the emergent advantage
+  is exactly `stun − recovery` = the I-1 quote, *independent of which active frame connected*. This
+  trades real-FG "meaty"/late-active-frame nuance for exact consistency with the frame-data contract
+  (audit C-1/C-3) and simpler determinism. Revisit if meaty okizeme becomes a design goal.
+
+- **DECISION: the resolution loop lives in `core/engine.ts`, not `tick.ts`.** Appendix A puts
+  `advance_until_next_decision()` in tick.ts, but mixing the L2 scheduler with the L0 time vocabulary
+  muddies the file. `tick.ts` stays the Tick/Ticks primitives; `engine.ts` holds MatchState, the Agent
+  interface, the loop, and contact application. Boundary rules are unaffected (both are in core/).
+
+- **DECISION: `doesHit` is a pure SPATIAL predicate; the active-frame gate stays in the engine.** The
+  spec's `does_hit(attacker, defender, tick)` includes "the move is on an active frame", but that is
+  engine timing. `collectContacts` only calls `doesHit` for attackers whose `phaseAt === "ACTIVE"`, so
+  `spatial/lane.ts` owns range/height/lateral/type only (audit C-7) and needs no tick/move coupling.
+
+- **DECISION: actionability is `readyTick ≤ T`; the stored `EntityState.kind` is a label.** A move's
+  active frames lie strictly before `readyTick`, so once `readyTick ≤ T` the entity is free regardless
+  of its label. `normalizeActionable` lazily transitions any now-actionable entity to NEUTRAL,
+  re-centers `offset` to 0, and auto-faces the opponent (§1.1). `advanceUntilNextDecision` steps one
+  tick at a time and returns at the FIRST tick some `readyTick ≤ T`, so at an ACTION pause `T == min
+  readyTick` and `computeRegime`'s ready_tick equality test aligns exactly.
+
+- **DECISION: cancel checkpoints are edge-triggered once per window entry.** `cancelEligible` fires only
+  when `elapsed === firstEligibleTick`, where `firstEligibleTick = startupCancelable ? window.from :
+  max(window.from, startup)` (no-startup-cancel, decision 6). Because `stepOneTick` always advances the
+  clock before the next checkpoint test, a declined cancel cannot re-fire ⇒ no infinite loop, no
+  consumed-checkpoint bookkeeping. (Artifact: the cancel commits at the tick AFTER detection — fine for
+  a turn-based engine.) Cancel targets for Phase 3 = the whole move table; Phase 4 restricts via
+  CancelWindow.into + AP cost. Hit-confirm is honest: CancelView carries the actual contact fact.
+
+- **DECISION: damage scaling uses `toIntRound` (half-up), not `toInt` (floor).** `0.9` in 16.16 is
+  `0.899994`, so compounding `mul` + floor makes `100×0.9 → 89`. A pure-integer half-up conversion
+  (`floor((raw+32768)/65536)`, no `toNumber`) gives the intuitive `90/81/73…` and CH `10→13`, stays
+  deterministic/portable, and still strictly decreases so combos terminate.
+
+- **DECISION: movement is a discrete hop at the first active frame (decision 9).** `Motion {lane,
+  offset}` repositions the ENTITY (distinct from `ReachProfile.advance`, which only extends the hitbox).
+  Applied once at `elapsed === startup`; `offset` re-centers when the entity next becomes actionable
+  (auto-facing). Lateral is set during the move so a sidestep dodges an opponent's same-tick active.
+
+- **DECISION: PROJECTILE_SPAWN is a throwing stub (decision 8).** The Property kind + data slot exist,
+  but `guardNoProjectile` throws if a PROJECTILE_SPAWN window ever goes active, so a move that actually
+  spawns one fails loudly rather than silently no-op'ing. The projectile entity is deferred (spec §2.9).

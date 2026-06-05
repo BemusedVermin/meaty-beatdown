@@ -14,15 +14,14 @@
  */
 import { type Fixed, ZERO, add, sub, abs, compare } from "../core/fixed";
 import { type SpatialState, type ReachProfile } from "../core/spatial-types";
-import { type MoveLevel, type InvulnType } from "../core/frameprofile";
+import {
+  type MoveLevel,
+  type InvulnType,
+  type AttackType,
+  attackTypeOf,
+} from "../core/frameprofile";
 
-/** The category an attack matches against typed invincibility. Projectiles are deferred (decision 8). */
-export type AttackType = "STRIKE" | "THROW";
-
-/** A move's attack type derives from its level: only THROW-level moves are throws (spec §2.6). */
-export function attackTypeOf(level: MoveLevel): AttackType {
-  return level === "THROW" ? "THROW" : "STRIKE";
-}
+export { type AttackType, attackTypeOf };
 
 const NO_INVULN: ReadonlySet<InvulnType> = new Set<InvulnType>();
 

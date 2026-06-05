@@ -48,7 +48,16 @@ export interface MoveInstance {
   readonly profile: FrameProfile;
   /** The tick `T` at which the move began; all phase boundaries derive from this. */
   readonly startTick: Tick;
+  /** Whether this instance has already registered a contact (single-hit; multi-hit is out of scope). */
+  readonly connected: boolean;
+  /** The kind of contact this move made (for hit-confirm cancels — spec §2.10). */
+  readonly contact: MoveContact;
+  /** Armor hits absorbed so far by this instance (vs the ARMOR property's armorHits budget). */
+  readonly armorHitsUsed: number;
 }
+
+/** What a move connected as, for hit-confirm gating (a local union to keep entity free of resolver). */
+export type MoveContact = "NONE" | "HIT" | "BLOCK";
 
 /** A move's phase, derived from elapsed ticks (spec §2.2 "update phase based on elapsed ticks"). */
 export type MovePhase = "STARTUP" | "ACTIVE" | "RECOVERY" | "DONE";
@@ -84,7 +93,7 @@ export type EntityState =
   | { readonly kind: "RECOVERY"; readonly move: MoveInstance }
   | { readonly kind: "HITSTUN"; readonly until: Tick }
   | { readonly kind: "BLOCKSTUN"; readonly until: Tick }
-  | { readonly kind: "AIRBORNE"; readonly until: Tick }
+  | { readonly kind: "AIRBORNE"; readonly until: Tick; readonly juggleCount: number }
   | { readonly kind: "DOWN"; readonly wakeupTick: Tick }
   | { readonly kind: "GUARDBROKEN"; readonly until: Tick };
 

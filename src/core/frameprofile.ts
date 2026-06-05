@@ -16,7 +16,7 @@
  */
 import { type Fixed, compare } from "./fixed";
 import { type Ticks } from "./tick";
-import { type ReachProfile } from "./spatial-types";
+import { type ReachProfile, type Motion } from "./spatial-types";
 
 // ---------------------------------------------------------------------------
 // Levels & directions (fieldless enumerations → string-literal unions; map to Rust fieldless enums)
@@ -30,6 +30,14 @@ export type MoveLevel = "HIGH" | "MID" | "LOW" | "OVERHEAD" | "THROW" | "UNBLOCK
 
 /** Typed invincibility categories (spec §0.3). ALL = full i-frames; the rest are type-specific. */
 export type InvulnType = "ALL" | "STRIKE" | "THROW" | "PROJECTILE";
+
+/** The category an attack matches against typed invincibility. Projectiles are deferred (decision 8). */
+export type AttackType = "STRIKE" | "THROW";
+
+/** A move's attack type derives from its level: only THROW-level moves are throws (spec §2.6). */
+export function attackTypeOf(level: MoveLevel): AttackType {
+  return level === "THROW" ? "THROW" : "STRIKE";
+}
 
 // ---------------------------------------------------------------------------
 // Property windows (spec §0.3) — each property is live during a tick range relative to move start
@@ -69,6 +77,9 @@ export type Property =
   | { readonly kind: "COUNTER_HIT_STATE"; readonly window: Window }
   /** Auto-blocks one hit during the window, then the move continues (sabaki/parry — spec §0.3, §2.6). */
   | { readonly kind: "GUARD_POINT"; readonly window: Window }
+  /** A held blocking stance covering the listed levels (spec §2.5). A strike whose level is covered
+   *  is BLOCKED; an uncovered level (the mixup) is a clean hit. Throws beat block (spec §2.6). */
+  | { readonly kind: "BLOCK"; readonly covers: readonly MoveLevel[]; readonly window: Window }
   /** Marks a window where cancels are legal (gating handled in L3 — spec §0.3, §3.4). */
   | { readonly kind: "CANCELABLE"; readonly window: Window }
   /** Entity is launched / juggle-state during the window (spec §0.3, §2.8). */
@@ -84,6 +95,7 @@ export function propertyWindow(p: Property): Window {
     case "ARMOR":
     case "COUNTER_HIT_STATE":
     case "GUARD_POINT":
+    case "BLOCK":
     case "CANCELABLE":
     case "AIRBORNE":
     case "PROJECTILE_SPAWN":
@@ -113,6 +125,8 @@ export interface HitEffect {
   readonly knockback: Fixed;
   /** If true, the hit launches the defender into AIRBORNE (juggle — spec §2.8). */
   readonly launches: boolean;
+  /** If true, the hit knocks the defender DOWN (okizeme/wakeup — spec §2.8). */
+  readonly knockdown: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -141,6 +155,10 @@ export interface FrameProfile {
   readonly level: MoveLevel;
   /** Spatial footprint the engine feeds to spatial/lane.ts `doesHit` (spec §1.2). */
   readonly reach: ReachProfile;
+  /** Decision 6: a move is cancelable only from active/recovery unless this is true (spec §2.10). */
+  readonly startupCancelable: boolean;
+  /** Repositioning of the entity (movement moves). Omitted for moves that don't reposition. */
+  readonly motion?: Motion;
   // readonly cancelWindows / cost     ← added Phase 4 (L3, moves/)
 }
 

@@ -76,6 +76,11 @@ export default tseslint.config(
         "error",
         { requireDefaultForNonUnion: true },
       ],
+      // Allow intentionally-unused, interface-required params/vars when prefixed with `_`.
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrorsIgnorePattern: "^_" },
+      ],
     },
   },
   {

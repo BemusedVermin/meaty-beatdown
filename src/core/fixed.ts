@@ -51,6 +51,15 @@ export function toInt(f: Fixed): number {
 }
 
 /**
+ * Convert a Fixed to an integer, rounding half-UP toward +∞ (pure integer: add half, then floor).
+ * Used for damage scaling so e.g. 100 × 0.9 (which 16.16 holds as 89.9994) lands on 90, not 89.
+ * toIntRound(12.5) === 13, toIntRound(-12.5) === -12. Stays in integer land (never calls toNumber).
+ */
+export function toIntRound(f: Fixed): number {
+  return Math.floor(((f as number) + 32768) / 65536);
+}
+
+/**
  * Construct a Fixed from the rational num/den. TRUNCATES toward zero (like native integer
  * division in the target languages). fromRatio(1,2) === half, fromRatio(-1,3) truncates toward 0.
  */

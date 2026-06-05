@@ -52,6 +52,14 @@ export const CONFIG = {
     PARRY_FOCUS_REFUND: 1,
     /** Decision 7 / spec §3.5.2: parry refunds AP on success (ON_PARRY +2). TUNING. */
     PARRY_AP_REFUND: 2,
+    /** Ticks the attacker is frozen after being parried — "huge plus for defender" (spec §2.6). TUNING. */
+    PARRY_FREEZE_TICKS: 30,
+    /** Ticks before the successful parrier is actionable (a quick, large advantage). TUNING. */
+    PARRY_RECOVER_TICKS: 4,
+    /** Ticks both throwers recover after a throw-tech clash (spec §2.6). TUNING. */
+    THROW_TECH_RECOVER_TICKS: 8,
+    /** Stun ticks of a guard break (a long, fully-punishable stun — spec §2.5). TUNING. */
+    GUARD_BREAK_STUN_TICKS: 40,
   },
 } as const;
 

@@ -13,6 +13,7 @@ import {
   ONE,
   fromInt,
   toInt,
+  toIntRound,
   fromRatio,
   add,
   sub,
@@ -131,6 +132,17 @@ describe("toInt — floors toward −∞", () => {
     expect(toInt(fromRatio(-7, 2))).toBe(-4); // -3.5 → -4 (floor, not trunc)
     expect(toInt(fromRatio(1, 3))).toBe(0); //  0.333 → 0
     expect(toInt(fromRatio(-1, 3))).toBe(-1); // -0.333 → -1
+  });
+});
+
+describe("toIntRound — rounds half-up toward +∞ (pure integer)", () => {
+  it("rounds at the half and matches toInt away from it", () => {
+    expect(toIntRound(fromRatio(7, 2))).toBe(4); //  3.5 → 4
+    expect(toIntRound(fromRatio(-7, 2))).toBe(-3); // -3.5 → -3 (half-up toward +∞)
+    expect(toIntRound(fromRatio(5, 2))).toBe(3); //  2.5 → 3
+    expect(toIntRound(fromInt(4))).toBe(4);
+    expect(toIntRound(fromRatio(1, 3))).toBe(0); //  0.333 → 0
+    expect(toIntRound(fromRatio(2, 3))).toBe(1); //  0.667 → 1
   });
 });
 

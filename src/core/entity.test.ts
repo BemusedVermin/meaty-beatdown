@@ -1,60 +1,26 @@
 import { describe, it, expect } from "vitest";
 import { fromInt } from "./fixed";
-import { type FrameProfile } from "./frameprofile";
 import {
   type EntityState,
   type MoveInstance,
-  type Resources,
-  type Entity,
   phaseAt,
   moveReadyTick,
   entityStateTag,
   stateMove,
   isActionable,
 } from "./entity";
+import { makeProfile, makeMove, makeEntity } from "../test-support/fixtures";
 
-const heavyCleaveProfile: FrameProfile = {
-  timing: { startup: 14, active: 3, recovery: 18 }, // total 35; active window [14,16]
-  hitEffect: {
-    damage: 40,
-    hitstun: 23,
-    blockstun: 12,
-    chipDamage: 4,
-    knockback: fromInt(3),
-    launches: false,
-  },
-  properties: [],
-  level: "MID",
-  reach: {
-    minRange: fromInt(0),
-    maxRange: fromInt(4),
-    heightLow: fromInt(0),
-    heightHigh: fromInt(2),
-    advance: fromInt(1),
-    lateralBand: fromInt(1),
-    stepIn: fromInt(0),
-    trackSide: 0,
-  },
-};
-
-const move: MoveInstance = {
+// Heavy Cleave (st14 a3 r18, total 35; active window [14,16]), started at an arbitrary non-zero T.
+const move: MoveInstance = makeMove({
   moveId: "heavy_cleave",
-  profile: heavyCleaveProfile,
-  startTick: 100, // start at an arbitrary non-zero T to exercise the elapsed math
-};
-
-const resources: Resources = {
-  hp: 100,
-  hpMax: 100,
-  stamina: 50,
-  staminaMax: 50,
-  poise: 30,
-  poiseMax: 30,
-  focus: 10,
-  focusMax: 10,
-  ap: 5,
-  apMax: 5,
-};
+  startTick: 100,
+  profile: makeProfile({
+    timing: { startup: 14, active: 3, recovery: 18 },
+    hitEffect: { damage: 40, hitstun: 23, blockstun: 12, knockback: fromInt(3) },
+    reach: { maxRange: fromInt(4), advance: fromInt(1) },
+  }),
+});
 
 describe("phaseAt — STARTUP→ACTIVE→RECOVERY→DONE from elapsed = T − startTick", () => {
   it("boundaries are correct for Heavy Cleave (st14 a3 r18, start at T=100)", () => {
@@ -81,7 +47,7 @@ describe("EntityState — tagged union, exhaustive accessors (decision 11)", () 
     { kind: "RECOVERY", move },
     { kind: "HITSTUN", until: 150 },
     { kind: "BLOCKSTUN", until: 140 },
-    { kind: "AIRBORNE", until: 160 },
+    { kind: "AIRBORNE", until: 160, juggleCount: 0 },
     { kind: "DOWN", wakeupTick: 180 },
     { kind: "GUARDBROKEN", until: 170 },
   ];
@@ -112,13 +78,7 @@ describe("EntityState — tagged union, exhaustive accessors (decision 11)", () 
 
 describe("isActionable — keyed off ready_tick (spec §0.4)", () => {
   it("becomes actionable at ready_tick", () => {
-    const e: Entity = {
-      id: "reza",
-      state: { kind: "NEUTRAL" },
-      readyTick: 135,
-      resources,
-      spatial: { pos: fromInt(0), offset: fromInt(0), height: fromInt(1), facing: 1 },
-    };
+    const e = makeEntity({ id: "reza", readyTick: 135 });
     expect(isActionable(e, 134)).toBe(false);
     expect(isActionable(e, 135)).toBe(true);
     expect(isActionable(e, 200)).toBe(true);
