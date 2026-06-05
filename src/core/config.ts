@@ -75,6 +75,37 @@ export const CONFIG = {
     /** Stamina regained per tick while NOT executing a move (spec §3.1). TUNING. */
     STAMINA_REGEN_PER_TICK: 1,
   },
+
+  /**
+   * RPG → frame-data curves (spec §4.2, §4.5). Read ONLY by rpg/compiler.ts (the single bridge).
+   * WWN-style LOW modifiers, so frame-data swings stay small and the engine stays the star. All TUNING
+   * — these are the playtest-tuned "modifier → tick/stat" tables the spec flags as the largest open
+   * work item. R-2: each attribute drives exactly ONE major lever (no double-dip). R-3: gates are
+   * floors; exceeding a requirement gives a small CAPPED bonus, never runaway scaling.
+   */
+  rpg: {
+    // DEX → speed (−startup on lights/normals), capped (R-3).
+    DEX_STARTUP_REDUCTION_PER_MOD: 1,
+    DEX_STARTUP_REDUCTION_CAP: 3,
+    DEX_ADVANCE_PER_MOD: 1, // +movement advance (fixed-point units applied by the compiler)
+    // STR → damage on heavies/throws + armor budget.
+    STR_DAMAGE_PER_MOD: 2,
+    STR_ARMOR_HITS_PER_MOD: 1,
+    STR_ARMOR_HITS_CAP: 2,
+    // CON → survivability (HP / Stamina / Poise).
+    CON_HP_PER_MOD: 10,
+    CON_STAMINA_PER_MOD: 5,
+    CON_POISE_PER_MOD: 3,
+    // INT → Focus pool.
+    INT_FOCUS_PER_MOD: 2,
+    // Base pools before attribute contributions.
+    BASE_HP: 100,
+    BASE_STAMINA: 50,
+    BASE_POISE: 30,
+    BASE_FOCUS: 10,
+    // A move's startup never drops below this after DEX/weapon reductions.
+    MIN_STARTUP: 1,
+  },
 } as const;
 
 export type Config = typeof CONFIG;

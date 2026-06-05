@@ -160,3 +160,25 @@ decisions is recorded here, with its tradeoff. (The 12 locked decisions themselv
   defender increments comboCount; `effectiveHitstun(base, comboCount)` subtracts HITSTUN_DECAY_PER_HIT
   per extra hit (floored at MIN_HITSTUN) so chained advantage eventually goes minus and the combo must
   end. comboCount resets when the defender becomes actionable (the combo dropped).
+
+## Phase 5 — L4 RPG
+
+- **DECISION: `sheet.ts`/`equipment.ts` are PURE DATA (no core import); ALL core-dependent derivation
+  lives in `compiler.ts`, the single bridge.** Anything needing CONFIG, Fixed, or FrameProfile (apMax
+  via the tempo-tier curve, the frame-data levers, range→fixed-point) is computed in compiler.ts. The
+  one derivation `sheet.ts` keeps — `tempoMod` — uses the documented integer-equivalent
+  `floor((dex+wis+1)/2)` (= roundHalfUp((dex+wis)/2)) so it needs no core import. dependency-cruiser
+  proves compiler.ts is the only rpg→core bridge (audit C-5).
+
+- **DECISION: CHA has no derived combat lever (decision 5).** With tempo derived from DEX+WIS, CHA loses
+  the spec's §3.5.4 AP assignment and is not wired to any frame-data lever in the prototype; its identity
+  comes from feint/intimidate FOCI and content (out of the compiler's scope). Keeps R-2 (one lever per
+  attribute) clean: STR→damage/armor, DEX→speed/advance, CON→survivability, INT→Focus, WIS→defense reads.
+
+- **DECISION: weapon ranges are plain integer "lane units"; the compiler converts to fixed-point.** Keeps
+  equipment.ts free of core/fixed. STR damage bonus applies to `moveClass` HEAVY/THROW (or level THROW).
+  R-3 bonuses (DEX startup reduction, STR armor hits) are CONFIG-capped.
+
+- **DECISION: R-4 is Pareto dominance over (reach, speed = −startupDelta, damage).** A weapon that is
+  ≥ another on all three axes and strictly > on one violates the tradeoff triangle; `paretoDominations`
+  returns every such ordered pair (audit R-4). Lives in equipment.ts (pure weapon data, no core).
