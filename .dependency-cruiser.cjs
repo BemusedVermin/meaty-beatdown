@@ -39,6 +39,14 @@ module.exports = {
       to: { dependencyTypes: ["core"] },
     },
     {
+      name: "engine-is-content-agnostic",
+      comment:
+        "The engine layers must never import sample content — 'the engine never hard-codes a move'. Content is data consumed only at the top (cli/balance/golden).",
+      severity: "error",
+      from: { path: "^src/(core|spatial|moves|rpg|serialize)/" },
+      to: { path: "^src/content/" },
+    },
+    {
       name: "no-circular",
       comment: "No circular dependencies anywhere.",
       severity: "error",

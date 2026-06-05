@@ -182,3 +182,27 @@ decisions is recorded here, with its tradeoff. (The 12 locked decisions themselv
 - **DECISION: R-4 is Pareto dominance over (reach, speed = −startupDelta, damage).** A weapon that is
   ≥ another on all three axes and strictly > on one violates the tradeoff triangle; `paretoDominations`
   returns every such ordered pair (audit R-4). Lives in equipment.ts (pure weapon data, no core).
+
+## Phase 6 — balance tooling + sample content
+
+- **DECISION: `content/` is swappable sample DATA, consumed only at the top.** A new dependency-cruiser
+  rule (`engine-is-content-agnostic`) forbids core/spatial/moves/rpg/serialize from importing content/
+  — "the engine never hard-codes a move." content/builders.ts fills FrameProfile defaults;
+  content/sample.ts has ~12 moves / 3 weapons / 2 archetypes, authored to pass R-1/R-4/R-5.
+
+- **DECISION: budget weights + MOVE_VALUE live in `balance/budget.ts` (tooling, floats allowed).** The
+  budget identity is INFORMATIONAL — `budgetReport` flags moves whose value deviates > ±ε from the
+  archetype mean (heavy_cleave shows up for Borin, as expected of a big slow armored move); it is not a
+  hard pass/fail. R-2 is encoded as an explicit lever map (no attribute both offensive+defensive); R-3
+  checks the CONFIG caps exist.
+
+- **DECISION: `audit.ts` is a top-level script (prints + sets process.exitCode); not imported by any
+  test.** Its top-level print runs only under `npm run audit`; the rule functions are unit-tested in
+  budget.test.ts. Structural invariants (C-2/C-5/C-6/C-7/C-9) pass with a note citing their enforcement
+  mechanism (dependency-cruiser / engine / config); the rest (C-1/C-3/C-4/C-8/C-10/C-11, R-1..R-5) run
+  live over the content.
+
+- **DECISION (content tuning): LINEAR strikes need lateralBand < a 1-unit sidestep.** With the default
+  band = 1.0, a single sidestep (offset ±1) lands exactly on the inclusive edge and still connects, so a
+  sidestep wouldn't dodge. The sample LINEAR strikes use band 0.5 so a sidestep genuinely evades them
+  (and HOMING's stepIn realigns), which is what audit C-8/C-11 verify.
