@@ -1,13 +1,13 @@
 /**
  * io.ts — read/write golden vector files [golden, edge].
  *
- * Vectors live in the repo-root `golden/` directory (data artifacts, committed). npm scripts run from
- * the repo root, so `process.cwd()` resolves there.
+ * Vectors live in the repo-root `golden/` directory (data artifacts, committed, shared across
+ * implementations). npm scripts run from `ts/`, so the shared `golden/` is one level up.
  */
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
-export const VECTORS_DIR = join(process.cwd(), "golden");
+export const VECTORS_DIR = join(process.cwd(), "..", "golden");
 
 export function writeVectorFile(id: string, json: string): void {
   mkdirSync(VECTORS_DIR, { recursive: true });
