@@ -41,6 +41,10 @@ pub enum BodyPart {
     Foot,
     Knee,
     Elbow,
+    /// Added by the `Fanged` modifier (attaches to a `Head`) — the bite source.
+    Fangs,
+    /// Added by the `Clawed` modifier (attaches to a `Fist`) — the claw source.
+    Claws,
 }
 
 /// Place a body-local box into world space: mirror X by facing, then translate by `pos`.
