@@ -1,5 +1,6 @@
 //! The generated world: a hex map of terrain + POIs.
 
+use super::encounter::Encounter;
 use super::hex::Hex;
 use super::poi::{Faction, Poi};
 use super::terrain::Terrain;
@@ -19,6 +20,8 @@ pub struct World {
     pub radius: i32,
     pub tiles: HashMap<Hex, Tile>,
     pub pois: HashMap<Hex, Poi>,
+    /// Visible encounter tokens on water hexes (no random encounters).
+    pub encounters: HashMap<Hex, Encounter>,
 }
 
 impl World {
@@ -27,6 +30,13 @@ impl World {
     }
     pub fn poi(&self, h: Hex) -> Option<&Poi> {
         self.pois.get(&h)
+    }
+    pub fn encounter(&self, h: Hex) -> Option<&Encounter> {
+        self.encounters.get(&h)
+    }
+    /// Remove an encounter (e.g. after the player wins the fight). Returns what was cleared.
+    pub fn clear_encounter(&mut self, h: Hex) -> Option<Encounter> {
+        self.encounters.remove(&h)
     }
     pub fn count_terrain(&self, t: Terrain) -> usize {
         self.tiles.values().filter(|tile| tile.terrain == t).count()

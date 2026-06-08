@@ -7,6 +7,7 @@
 //! hazards to reach the land target → place POIs, scaling count with land area and guaranteeing at
 //! least one merchant (`Port`) and one trainer (`SectHall`).
 
+use super::encounter::Encounter;
 use super::hex::{map_hexes, Hex};
 use super::poi::{Faction, Poi};
 use super::terrain::Terrain;
@@ -62,7 +63,10 @@ pub fn generate(seed: u64, cfg: &GenConfig) -> World {
     // 4. Place POIs on land, scaled by area, guaranteeing merchants + trainers.
     place_pois(&mut tiles, &mut pois, &mut rng);
 
-    World { seed, radius: cfg.radius, tiles, pois }
+    // 5. Scatter visible encounter tokens across the water (no random encounters).
+    let encounters = place_encounters(&tiles, cfg, &mut rng);
+
+    World { seed, radius: cfg.radius, tiles, pois, encounters }
 }
 
 /// Axial hex distance.
@@ -230,6 +234,30 @@ fn ensure_one(
     }
 }
 
+/// Scatter visible encounter tokens on water hexes, count scaled with the size of the ocean.
+fn place_encounters(
+    tiles: &HashMap<Hex, Tile>,
+    cfg: &GenConfig,
+    rng: &mut fastrand::Rng,
+) -> HashMap<Hex, Encounter> {
+    let mut water: Vec<Hex> = tiles
+        .iter()
+        .filter(|(_, t)| t.terrain.is_water())
+        .map(|(h, _)| *h)
+        .collect();
+    water.sort_by_key(|h| (h.x, h.y)); // deterministic order before shuffle
+    rng.shuffle(&mut water);
+
+    let count = (water.len() / 30).max(cfg.masters as usize);
+    let mut encounters = HashMap::new();
+    for h in water.into_iter().take(count) {
+        let faction = FACTIONS[rng.usize(0..FACTIONS.len())];
+        let strength = rng.u8(0..=3);
+        encounters.insert(h, Encounter { faction, strength });
+    }
+    encounters
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -269,5 +297,15 @@ mod tests {
         let b = generate(999, &GenConfig::default());
         assert_eq!(a.tiles, b.tiles);
         assert_eq!(a.pois, b.pois);
+        assert_eq!(a.encounters, b.encounters);
+    }
+
+    #[test]
+    fn encounters_are_visible_on_water() {
+        let w = generate(42, &GenConfig::default());
+        assert!(!w.encounters.is_empty());
+        for h in w.encounters.keys() {
+            assert!(w.tiles[h].terrain.is_water(), "encounter on a non-water hex");
+        }
     }
 }
