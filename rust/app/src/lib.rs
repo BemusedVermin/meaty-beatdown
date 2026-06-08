@@ -12,7 +12,13 @@
 //!   `Combat` overlay and projects engine state onto ECS for presentation.
 
 pub mod combat;
+pub mod debuglog;
+pub mod exploration;
+pub mod render;
 pub mod state;
 
 pub use combat::CombatDriverPlugin;
+pub use debuglog::DebugLogPlugin;
+pub use exploration::ExplorationDriverPlugin;
+pub use render::RenderPlugin;
 pub use state::StatePlugin;
