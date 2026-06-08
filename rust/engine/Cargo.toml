@@ -1,0 +1,12 @@
+[package]
+name = "engine"
+version.workspace = true
+edition.workspace = true
+description = "TICK resolution + fight engine — the tick loop, the contact resolver, and fight-state mutation."
+
+# The deterministic core: no full Bevy (no ECS/App/render). Geometry only, via `bevy_math`.
+[dependencies]
+bevy_math.workspace = true
+fastrand = "2.4.1"
+fixed = "1.31.0"
+hexx = "0.24.0"

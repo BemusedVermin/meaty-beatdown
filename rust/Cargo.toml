@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+members = ["engine", "app"]
+
+# Shared across the crates so a port reads one set of numbers (version/edition in one place).
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+
+[workspace.dependencies]
+# Full Bevy is the `app` shell's dependency only. The deterministic core (`engine`) stays
+# Bevy-free and leans on `bevy_math` (glam + bounding volumes) for geometry — math, no ECS/App.
+bevy = "0.18"
+bevy_math = "0.18"
