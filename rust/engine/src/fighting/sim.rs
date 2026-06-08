@@ -98,25 +98,38 @@ impl Sim {
             .unwrap_or(false)
     }
 
+    /// Simulate **at most one tick** of work, exposing the in-between frames a driver needs to
+    /// *animate* a move (startup → active → recovery). Returns `Some(outcome)` when the sim is
+    /// already parked at a decision or an end — *no* tick ran, so `commit`/stop — or `None` when
+    /// exactly one tick advanced and the caller should step again. [`Sim::advance`] is just this
+    /// looped to the next decision; the two are behaviourally identical at decision granularity.
+    pub fn step(&mut self) -> Option<Outcome> {
+        if let Some(end) = self.end_condition() {
+            return Some(Outcome::Ended(end));
+        }
+        if let Some(d) = self.pending_decision() {
+            return Some(Outcome::Decision(d));
+        }
+        if let Some(cap) = self.max_ticks {
+            if self.tick >= cap {
+                return Some(Outcome::Ended(EndReason::TickCap));
+            }
+        }
+        self.tick += 1;
+        self.apply_motion();
+        self.resolve_tick();
+        self.complete_moves();
+        self.recover_from_stun();
+        None
+    }
+
     /// Run until the next decision point or an end condition. Idempotent while a decision is pending
-    /// (call [`Sim::commit`] to resolve it before advancing again).
+    /// (call [`Sim::commit`] to resolve it before advancing again). Equivalent to looping [`step`].
     pub fn advance(&mut self) -> Outcome {
         loop {
-            if let Some(end) = self.end_condition() {
-                return Outcome::Ended(end);
+            if let Some(outcome) = self.step() {
+                return outcome;
             }
-            if let Some(d) = self.pending_decision() {
-                return Outcome::Decision(d);
-            }
-            if let Some(cap) = self.max_ticks {
-                if self.tick >= cap {
-                    return Outcome::Ended(EndReason::TickCap);
-                }
-            }
-            self.tick += 1;
-            self.apply_motion();
-            self.resolve_tick();
-            self.complete_moves();
         }
     }
 
@@ -155,7 +168,9 @@ impl Sim {
 
     // ---- regime / decisions -------------------------------------------------
 
-    fn pending_decision(&self) -> Option<Decision> {
+    /// Who the engine is currently waiting on (the same `Decision` a pending `advance` returns).
+    /// Public so a driver can resolve each ready actor's action without re-advancing.
+    pub fn pending_decision(&self) -> Option<Decision> {
         let now = self.tick;
         let contenders: Vec<EntityId> =
             (0..self.entities.len()).filter(|&i| self.entities[i].is_alive()).collect();
@@ -369,6 +384,27 @@ impl Sim {
                     e.reaction = Reaction::Neutral;
                     e.ready_tick = now + recover;
                 }
+            }
+        }
+    }
+
+    /// Return any fighter whose **stun has worn off** to `Neutral`. A hit/block/parry leaves the
+    /// victim with `action = None` and a transient `reaction` (Hitstun/Blockstun/Airborne/Down/…)
+    /// plus a `ready_tick`. When that tick arrives nothing else clears the reaction — `complete_moves`
+    /// only resets fighters who are mid-*move*, and skips anyone whose `action` is `None` — so without
+    /// this the fighter stays flagged stunned forever and [`Entity::is_actionable`] (which requires
+    /// `Neutral`) locks it out of every future decision after its first contact. This is the missing
+    /// edge of the reaction state machine: stun expiry → `Neutral`. Runs after `resolve_tick`, so a
+    /// fighter re-hit on its wake-up tick stays stunned (the new stun's `ready_tick` is still ahead).
+    fn recover_from_stun(&mut self) {
+        let now = self.tick;
+        for e in &mut self.entities {
+            if e.is_alive()
+                && e.action.is_none()
+                && e.ready_tick <= now
+                && !matches!(e.reaction, Reaction::Neutral | Reaction::KO)
+            {
+                e.reaction = Reaction::Neutral;
             }
         }
     }
@@ -636,6 +672,41 @@ mod tests {
         sim.commit(&[(1, Action::Use(MoveId(1))), (0, Action::Wait)]);
         drain(&mut sim);
         assert_eq!(sim.entities[0].health, 100);
+    }
+
+    #[test]
+    fn a_struck_fighter_recovers_and_acts_again() {
+        // A lands one punch on B, then both idle. Once B's hitstun expires it must return to Neutral
+        // and be offered another decision — never permanently locked out (the recovery-edge bug).
+        let mut sim = sim_with(humanoid(), v(1.0, 0.0, 0.0), &[(1, punch())]);
+        let _ = sim.advance();
+        sim.commit(&[(0, Action::Use(MoveId(1))), (1, Action::Wait)]);
+
+        let full = sim.entities[1].health;
+        let mut b_was_hit = false;
+        let mut b_decided_after_hit = false;
+        for _ in 0..200 {
+            match sim.advance() {
+                Outcome::Decision(d) => {
+                    if sim.entities[1].health < full {
+                        b_was_hit = true;
+                    }
+                    let ids = match &d {
+                        Decision::Neutral(v) => v.clone(),
+                        Decision::Pressure(i) => vec![*i],
+                    };
+                    if b_was_hit && ids.contains(&1) {
+                        b_decided_after_hit = true;
+                        break;
+                    }
+                    let c: Vec<_> = ids.iter().map(|&i| (i, Action::Wait)).collect();
+                    sim.commit(&c);
+                }
+                Outcome::Ended(_) => break,
+            }
+        }
+        assert!(b_was_hit, "setup: B should have taken the punch");
+        assert!(b_decided_after_hit, "B was locked out after being hit — never recovered to Neutral");
     }
 
     #[test]
