@@ -1,5 +1,0 @@
-# Cargo build output (the workspace's shared target dir).
-/target
-
-# Cargo.lock is committed on purpose: this workspace builds a binary (`app`), so pinning exact
-# dependency versions makes every machine build identically. (Run `git add rust/Cargo.lock` once.)
