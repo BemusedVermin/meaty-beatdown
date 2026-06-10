@@ -38,4 +38,7 @@ Desktop.ini
 # only genuinely throwaway scratch stays out of history.
 notes/scratch/
 
+# Rust build output (Cargo.lock IS committed — reproducible builds)
+rust/target/
+
 # NOTE: golden/*.json are committed cross-language contract artifacts — do NOT ignore them.

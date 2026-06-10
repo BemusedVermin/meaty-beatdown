@@ -1,0 +1,12 @@
+[package]
+name = "app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# The one-way arrow: app -> engine, never the reverse (tech-plan §1).
+engine = { path = "../engine" }
+
+[lints]
+workspace = true

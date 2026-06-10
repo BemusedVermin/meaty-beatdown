@@ -1,0 +1,36 @@
+# The merge gate (tech-plan §6): fmt, clippy, tests — including the determinism suite —
+# on Linux AND Windows. The cross-OS probe test passing on both runners is the
+# cross-platform byte-identity proof. The content audit joins at Phase 2.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+      # rustup auto-installs the pinned toolchain (rust/rust-toolchain.toml) + components
+      # on the first cargo invocation; no separate toolchain action needed.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Tests (incl. determinism suite)
+        run: cargo test --workspace

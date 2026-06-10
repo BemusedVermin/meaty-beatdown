@@ -1,0 +1,20 @@
+[package]
+name = "engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+fixed.workspace = true
+cordic.workspace = true
+fastrand.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+# Not workspace-inherited: the engine adds the float ban on top (C-DET, enforced by
+# construction). The app converts Fx -> f32 at the render boundary, so it must NOT carry it.
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+float_arithmetic = "deny"
