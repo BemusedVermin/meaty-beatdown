@@ -2,8 +2,9 @@
 
 **TICK** — a party-based, partial-information, turn-based JRPG built on fighting-game frame data
 (the imitated fighter is Tekken; the register is Dragonball / One-Punch Man; the world is a
-fog-eaten xianxia setting). This repo is currently **design-first**: the docs are the product;
-implementation is planned but **not yet approved to start**.
+fog-eaten xianxia setting). The docs in `docs/` are the source of truth; implementation was
+**signed off 2026-06-10** and is being built in `rust/` phase-by-phase per
+`docs/implementation-plan.md`.
 
 ## State of the repo (since the 2026-06-09 reboot)
 
@@ -30,9 +31,10 @@ regenerated from the new engine (see `docs/tech-plan.md` §2).
 
 ## Working agreement (binding)
 
-1. **Do not create `rust/` or write implementation code until the user signs off on the
-   docs/plans.** The sign-off gate is explicit in `docs/implementation-plan.md`.
-2. After sign-off: **Claude implements, the user monitors.** Build in the phase order of the
+1. **The sign-off gate is passed** (2026-06-10, recorded in `docs/implementation-plan.md`).
+   Confirmed workflow: continuous build, gate commits pushed to origin/master, CI green per
+   gate, linear history.
+2. **Claude implements, the user monitors.** Build in the phase order of the
    implementation plan; every phase's exit criteria and the standing rules (audit + property
    tests as merge gates, no combat facts computed in `app`, every mechanic names its governor)
    apply.

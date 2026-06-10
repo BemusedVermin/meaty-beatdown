@@ -11,8 +11,9 @@ breaks: the full fighting-game trappings, with execution cost replaced by tactic
 
 ## Status
 
-**Design phase.** The docs below are the current product; implementation (Rust + Bevy) begins
-after the plans are signed off — see [`docs/implementation-plan.md`](./docs/implementation-plan.md).
+**In build** (signed off 2026-06-10). The docs below are the source of truth; the deterministic
+Rust engine + Bevy app are being built phase-by-phase in `rust/` —
+see [`docs/implementation-plan.md`](./docs/implementation-plan.md).
 A previous prototype (TypeScript reference + Rust workspace + golden vectors) was retired to git
 history (`0e2eaae`) in the 2026-06-09 clean-slate reboot; the v2 behavioral contract will be
 regenerated from the new engine.

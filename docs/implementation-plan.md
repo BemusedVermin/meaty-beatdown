@@ -1,10 +1,10 @@
 # TICK — Implementation Plan
 ### Phased build to the vertical slice
 
-> **⛔ STATUS: AWAITING SIGN-OFF.** Per the working agreement (2026-06-09): these docs come
-> first, the user reviews them, and **implementation does not begin until the user signs off.**
-> After sign-off, Claude implements with the user monitoring; every phase ends at a reviewable,
-> testable gate. Do not scaffold `rust/` before that approval.
+> **✅ STATUS: SIGNED OFF (2026-06-10).** The user approved the docs and the execution plan;
+> implementation is live — Claude builds, the user monitors. Confirmed workflow: continuous
+> build (no pauses at gates); every phase gate = commit + evidence summary, pushed to
+> origin/master with CI (Ubuntu + Windows) green as part of the gate; linear history on master.
 
 **Target:** the vertical slice (vision §6) — one island chain, a party of 3, one dungeon + boss,
 Heat/Rage/supers working, walls + one hazard arena, the loot loop closed, the Fog on the map.
