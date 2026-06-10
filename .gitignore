@@ -34,4 +34,7 @@ yarn-error.log*
 Thumbs.db
 Desktop.ini
 
+# Working notes (scratch space, not part of the design)
+notes/
+
 # NOTE: golden/*.json are committed cross-language contract artifacts — do NOT ignore them.

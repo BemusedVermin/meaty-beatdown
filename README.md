@@ -1,19 +1,32 @@
-# rpg-fighting-game
+# TICK (rpg-fighting-game)
 
-A headless, deterministic **combat + RPG engine** — a turn-based RPG built on fighting-game frame data,
-on a shared tick timeline.
+A **party-based, partial-information, turn-based JRPG built on fighting-game frame data** — all
+of Tekken's brain with none of Tekken's hands, drawn like an anime, set in a world being eaten
+by fog.
 
-This repo holds the language-neutral **design** plus the **Rust implementation**:
+You see your own frame data and an honest forecast of how your move will land. You **cannot**
+see what the opponent committed — only the cues a trained fighter could read, sharpened by
+matchup knowledge you earn across a campaign. Combos, supers, Heat, Rage, walls, throws-and-
+breaks: the full fighting-game trappings, with execution cost replaced by tactical depth.
 
-| Path | What it is |
+## Status
+
+**Design phase.** The docs below are the current product; implementation (Rust + Bevy) begins
+after the plans are signed off — see [`docs/implementation-plan.md`](./docs/implementation-plan.md).
+A previous prototype (TypeScript reference + Rust workspace + golden vectors) was retired to git
+history (`0e2eaae`) in the 2026-06-09 clean-slate reboot; the v2 behavioral contract will be
+regenerated from the new engine.
+
+## The docs
+
+| Doc | What it is |
 |---|---|
-| [`docs/`](./docs/) | The design — source of truth ([`frame_rpg_spec.md`](./docs/frame_rpg_spec.md)) + the mechanics reference & gap analysis. Language-neutral. |
-| [`golden/`](./golden/) | Cross-language **golden vectors** — the behavioral conformance contract. Language-neutral. |
-| [`rust/`](./rust/) | The implementation — a **from-scratch Rust rebuild** (in progress). See [`rust/README.md`](./rust/README.md) + [`rust/DESIGN.md`](./rust/DESIGN.md). |
-
-The durable deliverables are the design (`docs/`), the pure deterministic core, and the golden
-vectors (`golden/`). A TypeScript reference implementation originally generated the golden vectors and
-proved out the model; it has since been removed (preserved in git history). The Rust engine must
-reproduce the fixed-point reference table and replay every golden vector byte-identically.
-
-Run commands from inside `rust/` (`cd rust`).
+| [`docs/vision-mda.md`](./docs/vision-mda.md) | The vision and MDA — what this is and why it'll feel good |
+| [`docs/frame_rpg_spec.md`](./docs/frame_rpg_spec.md) | **The combat spec (v2)** — the source of truth for the fighting system |
+| [`docs/exploration.md`](./docs/exploration.md) | The fog-eaten hexcrawl: sailing, encounters, masters' islands, loot |
+| [`docs/progression.md`](./docs/progression.md) | No-XP progression: rank trials, attributes, Forms, gear, knowledge |
+| [`docs/fsm.md`](./docs/fsm.md) | The state machines (app, game, combat, actor) |
+| [`docs/the-promise-plot-bible.md`](./docs/the-promise-plot-bible.md) | Setting & narrative — THE PROMISE (v0.2) |
+| [`docs/tech-plan.md`](./docs/tech-plan.md) | Architecture: deterministic Rust engine + Bevy shell |
+| [`docs/implementation-plan.md`](./docs/implementation-plan.md) | The phased build plan to the vertical slice |
+| [`docs/archive/`](./docs/archive/) | v1 prototype docs (historical reference) |

@@ -1,675 +1,826 @@
-# FRAME / RPG SYSTEM SPECIFICATION
-### A turn-based RPG with fighting-game combat on a shared continuous timeline
-*Working title: **TICK** (everything is built on the tick).*
+# TICK — COMBAT SYSTEM SPECIFICATION v2
+### A party-based, partial-information, turn-based JRPG battle system built on fighting-game frame data
+*The imitated fighter is **Tekken**; the aesthetic register is **Dragonball / One-Punch Man**; the body is a JRPG.*
 
 ---
 
 ## How to read this document
 
-This spec is **modular by design** (per your stated preference). It is organized as a set of layers that each expose a clean interface and hide their internals, so any one layer can be re-implemented without touching the others:
+This is a full rewrite of the v1 spec (in git history) incorporating the locked decisions of
+2026-06-09. The layered architecture survives; the headline changes are:
+
+1. **Partial information everywhere.** v1 hid commitments only in the simultaneous "NEUTRAL
+   regime." v2 hides enemy intent *always*: you see authored **cues**, never committed moves, and
+   a **matchup-knowledge** system turns those cues into data over a campaign. (§7)
+2. **Party battles in a 3D arena.** v1 was two fighters on a 1D lane + sidestep offset. v2 is
+   N actors per side on a true ground plane, where **every actor targets exactly one other and
+   the target creates the lane**. All v1 lane math survives as the per-pair special case. (§3, §8)
+3. **Tekken systems land in full**: real heights and crouching, throw breaks as a directional
+   read, the launch → screw → bound → wall-splat juggle grammar, walls and authored stage
+   hazards, Heat and Rage. (§5, §6, §9)
+4. **Supers**: a buildable **Focus** gauge funding EX moves, cancels, and cinematic supers;
+   beams and projectiles are first-class. (§10)
+5. **Authored qualities, no engine constants.** Every combat magnitude lives in data — on a
+   move, a hit, a fighter's defense profile, or the swappable **Ruleset** object. The engine is
+   an interpreter with no numbers of its own. (§2.4)
+6. **No infinite combos** is a charter with seven independent governors and an audit. (§6.5)
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  L5  ENCOUNTER / AI            (out of scope — stubbed)   │
-├─────────────────────────────────────────────────────────┤
-│  L4  RPG LAYER   stats · skills · foci · equipment        │  ← feeds data down
-├─────────────────────────────────────────────────────────┤
-│  L3  MOVESET     moves · cancels · resources              │
-├─────────────────────────────────────────────────────────┤
-│  L2  COMBAT ENGINE   the shared tick timeline + resolver  │  ← the heart
-├─────────────────────────────────────────────────────────┤
-│  L1  SPATIAL     continuous lane · hitboxes · spacing     │
-├─────────────────────────────────────────────────────────┤
-│  L0  PRIMITIVES   tick · frame data · the entity state    │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  L5  ENCOUNTER / AI        agents behind the Observation API   │
+├──────────────────────────────────────────────────────────────┤
+│  L4  RPG LAYER   Forms · attributes · equipment · affixes     │ → compiles Builds into Fighters
+├──────────────────────────────────────────────────────────────┤
+│  L3  MOVESET     moves · cancels · meters · Ruleset           │
+├──────────────────────────────────────────────────────────────┤
+│  L2  COMBAT ENGINE   shared tick · scheduler · resolver       │ ← the heart
+├──────────────────────────────────────────────────────────────┤
+│  L1  SPATIAL     ground plane · target-lanes · walls          │
+├──────────────────────────────────────────────────────────────┤
+│  L0  PRIMITIVES   tick · Move schema · Entity · Reactions     │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-The contract between layers is deliberately narrow. **The RPG layer (L4) never reaches into the engine (L2).** It only produces a *resolved FrameProfile* and a *MoveList*, which the engine consumes as opaque data. This is the single most important architectural rule in the document: **stats and equipment are compilers that emit frame data; the engine is an interpreter that runs it.** That separation is what lets you tune the RPG and the fighting game independently.
+The load-bearing architectural rule is unchanged: **the RPG layer is a compiler that emits
+fighter data; the engine is an interpreter that runs it.** L4 never reaches into L2. The new
+second rule beside it: **the Observation API (§7.1) is the only window into a fight** — the UI
+and the AI both live behind it, so the fog of war is an architectural boundary, not a UI habit.
 
-Symbols used:
-- **✅ Decided** — specified fully, internally consistent.
-- **🔬 Researched** — grounded in a real-world comparable, noted inline.
-- **⚠️ Follow-up** — a genuine fork where I made a defensible default but you should confirm.
-
-A note on prior art, since you said the translation should be near one-to-one: the closest existing thing to what you're describing is **Your Only Move Is HUSTLE** (often "YOMI Hustle") — a turn-based game built directly on fighting-game frame data with simultaneous hidden commitment and no real-time clock. Where useful I reference it as a sanity check that the genre *works*. The formal backing for "map a continuous-time fight onto a discrete causality space so turn-based evaluation applies" is also a known technique in the animation/AI literature (the *temporal expansion approach*), which is reassuring: the translation you intuited is mathematically sound, not a hack.
+Symbols: ✅ decided · 🔬 grounded in a real-game comparable · ⚠️ tuning value, playtest-owned.
 
 ---
 
-# LAYER 0 — PRIMITIVES
+# §1 DESIGN CHARTERS (the rules above the rules)
 
-## 0.1 The tick ✅
+These are invariants. Content that violates them is wrong even if it's fun in isolation.
 
-The atomic unit of time is the **tick**. By convention **1 tick = 1 frame at 60 Hz ≈ 16.67 ms**, so frame data ports over one-to-one from real fighting games and from your own intuition. The clock never advances in real time; it advances only when the resolver says so. "No real-time constraint" means *the wall clock is irrelevant; the tick clock is everything.*
+- **C-EXEC — No execution cost.** Skill is *what* you commit and *when on the tick stream*, never
+  dexterity. Any mechanic whose only function is a reaction/precision barrier is translated away.
+- **C-DET — Determinism.** A fight is a pure function of (initial state, content, decisions).
+  No dice in combat resolution; integer/fixed-point math only; same inputs ⇒ byte-identical trace.
+- **C-FOG — The fog never leaks, the forecast never lies.** Enemy *intent* is hidden; resolved
+  *facts* are public. Anything shown to the player or the AI flows through Observation (§7.1).
+  The prediction UI shows exactly what the engine would do against the last-observed world.
+- **C-AUTH — Authored qualities.** No combat constant lives in engine code. Magnitudes live on
+  moves, hits, fighters, arenas, or the Ruleset (§2.4). There are **no generic moves**: every
+  move belongs to a Form and was authored with intent.
+- **C-FIN — No infinite combos.** Seven governors (§6.5), each independently sufficient,
+  mechanically audited. This is a charter item at the user's explicit insistence.
+- **C-QUAR — Quarantine.** Fighting-game mechanics exist only inside combat. Exploration and
+  menus never host frame data, drills, or previews (see `exploration.md`).
 
-There is a single **global tick counter `T`**, shared by both combatants. This shared clock is what makes whiff-punishing, frame traps, and spacing legible — exactly as in a real fighting game, where both characters live on one 60 Hz timeline.
+---
 
-## 0.2 Frame data — the core data structure ✅
+# §2 LAYER 0 — PRIMITIVES
 
-Every action is described by a **FrameProfile**. This is the spec's central object; almost everything else exists to produce, modify, or consume it.
+## 2.1 The tick ✅
+
+1 tick = 1 frame at 60 Hz ≈ 16.7 ms, so real frame data ports one-to-one. A single global counter
+`T` is shared by **all** actors. The wall clock is irrelevant: the engine advances `T` only when
+no actor needs to decide, and pauses indefinitely at every decision point.
+
+## 2.2 The Move — orthogonal axes ✅
+
+v1 conflated type, height, and blockability into one `MoveLevel` enum (and duplicated THROW
+across two enums — a latent bug). v2 decomposes every move into **orthogonal axes**: each axis
+answers exactly one question, and any combination is expressible.
 
 ```
-FrameProfile {
-  startup        : int   # ticks before the first active tick
-  active         : int   # ticks the hitbox/effect is live
-  recovery       : int   # ticks after active before actionable again
-  // derived: total = startup + active + recovery
+Move {
+  id, name, form_id                  # every move belongs to a Form (C-AUTH: no generic moves)
+  tags        : [LIGHT|HEAVY|SPECIAL|SUPER|MOVEMENT|STANCE|RESCUE|BURST|REVERSAL|...]
 
-  // --- on-contact frame advantage (the soul of the system) ---
-  on_hit         : int   # frame advantage if it HITS (can be + or -)
-  on_block       : int   # frame advantage if BLOCKED (usually -)
-  on_whiff       : int   # = 0 by definition; you eat full recovery
+  # ── the orthogonal type axes ─────────────────────────────────────────
+  category    : STRIKE | THROW | PROJECTILE | MOTION | STANCE | UTILITY
+  height      : HIGH | MID | LOW | NONE      # strikes/projectiles; NONE for motion/stance
+  blockable   : bool                          # orthogonal to height (unblockables exist at any height)
+  tracking    : LINEAR | TRACK_L | TRACK_R | HOMING     # vs lateral movement (§3.5)
 
-  // --- properties (flags + windows), see 0.3 ---
-  properties     : Property[]
-  cancel_windows : CancelWindow[]   # see L3
-  hit_effect     : HitEffect        # damage, stun, knockback, status
-  cost           : ResourceCost     # see L3 — includes AP cost/gain (action economy, 3.5)
-  reach          : ReachProfile      # see L1 (spatial)
-  level          : MoveLevel        # high / mid / low / throw / unblockable
+  # ── timing & space ───────────────────────────────────────────────────
+  timing      : { startup, active, recovery }            # ticks
+  hits        : [HitEvent]                               # multi-hit moves are first-class
+  region      : ReachEnvelope                            # §3.4
+  motion      : SelfMotion                               # per-phase self-displacement (§3.6)
+
+  # ── windows & costs ──────────────────────────────────────────────────
+  properties  : [PropertyWindow]                         # §2.5
+  cost        : { breath, ap, focus }                    # §9
+  gains       : [{ resource, amount, gate }]             # gate ∈ ON_HIT|ON_CH|ON_BLOCK|ON_PARRY|ON_WHIFF_PUNISH|ALWAYS
+  cancels     : [CancelWindow]                           # §11
+  startup_cancelable : bool                              # default false (§11.3)
+
+  # ── information & interaction ────────────────────────────────────────
+  cue         : CueClass                                 # what enemies SEE (§7.2)
+  reqs        : { stance?, state?, condition? }          # e.g. state=DOWN (wake-up), ALLY_IN_HITSTUN (rescue)
+  break_key   : L | R | NONE                             # throws only (§5.4)
+}
+
+HitEvent {
+  at          : tick offset(s) within the active window
+  damage      : int
+  chip_guard  : int                                      # drains the blocker's Guard meter
+  reaction    : Reaction                                 # §6.1 — what a clean hit DOES
+  ch_reaction : Reaction?                                # counter-hit override (e.g. "CH launcher")
+  flags       : { friendly_fire (default false), back_bonus?, splat_eligible (default true) }
+  gains_override : ...                                   # per-hit Focus/AP gain overrides
 }
 ```
 
-**Frame advantage** is the load-bearing concept. After two moves resolve, one character becomes actionable before the other. The difference (in ticks) is the *frame advantage*. Positive advantage = "your turn comes first in the next exchange" = pressure. Negative = "you're exposed" = the opponent may punish. This single number is how a turn-based game reproduces the entire neutral/pressure/punish loop of a fighter.
+**Frame advantage is derived, never stored** (invariant I-1, inherited verbatim from v1):
+`on_hit = defender_stun − attacker_remaining`; `on_block = blockstun − attacker_remaining`;
+`on_whiff = 0` (you eat your full recovery and are exposed). The authoring pipeline computes
+advantage and refuses inconsistent data — the engine can never lie to the player.
 
-> **Identity that must always hold (invariant I-1):**
-> `on_hit = (defender_hitstun) − (attacker_recovery_after_active)`
-> `on_block = (defender_blockstun) − (attacker_recovery_after_active)`
-> i.e. advantage is *defined* as "how long the defender is locked minus how long I'm locked." If you ever set `on_hit`/`on_block` by hand to a value inconsistent with the stun and recovery numbers, the engine is lying to the player. The authoring tool should compute these, never accept them raw. (Consistency hook — flagged again in the audit.)
+## 2.3 The Entity ✅
 
-## 0.3 Properties (frame flags) ✅
-
-Properties attach to *specific tick ranges* of a move. They are how fighting-game tech (i-frames, armor, etc.) ports over. Each is a window `[from_tick, to_tick]` relative to the move's own start.
-
-| Property | Effect during its window | Ported from |
-|---|---|---|
-| **Invincible (i-frames)** | Cannot be hit at all. Hitboxes pass through. | Reversals, wakeup DPs |
-| **Strike-invuln / Throw-invuln / Projectile-invuln** | Typed invincibility (only that category passes through). | Type-specific reversals |
-| **Armor (hyper armor)** | Absorbs N hits without entering hitstun; still takes damage (often reduced). `armor_hits` and `armor_damage_mult` params. | Tekken/SF armor moves |
-| **Counter-hit state** | If struck during this window, defender takes a **counter-hit** (bonus damage + extended hitstun, see 2.7). Startup and recovery are counter-hit windows by default. | Universal CH rules |
-| **Guard-point** | Auto-blocks one hit from a direction during the window, then continues the move. | Tekken sabaki / parries |
-| **Cancelable** | Marks a window where cancels are legal (see L3). | Combo cancels |
-| **Airborne / juggle-state** | Entity is launched; subject to juggle rules (2.8). | Launchers/juggles |
-| **Projectile-spawn** | Emits an independent timeline entity (see 2.9). | Fireballs/zoning |
-| **Tracking** | How the move behaves vs. a side-stepping defender: `LINEAR` (whiffs if defender stepped off-axis), `TRACKING` (realigns vs. moderate offset, weak to one side), `HOMING` (realigns fully, beats sidestep both ways). Default `LINEAR`. | **Tekken linear/homing system** |
-
-⚠️ **Follow-up:** whether **armor** also applies to throws. Default: armor does **not** stop throws (throws beat armor), preserving the rock-paper-scissors below. Confirm.
-
-## 0.4 Entity state ✅
+There is **no separate Fighter type** (locked decision): one Entity carries the compiled
+offensive kit, the compiled defensive profile, and all runtime state.
 
 ```
 Entity {
-  pos            : float    # position on the spacing lane (distance axis)   [L1]
-  offset         : float    # lateral/depth displacement off the shared axis (sidestep)  [L1, see 1.1]
-  facing         : ±1
-  ready_tick     : int      # the tick at which this entity becomes actionable
-  state          : NEUTRAL | STARTUP | ACTIVE | RECOVERY | HITSTUN
-                 | BLOCKSTUN | AIRBORNE | DOWN | GUARDBROKEN
-  current_action : MoveInstance | null
-  resources      : { poise, focus, stamina, ap, ... }   # see L3 (ap = action economy, 3.5)
-  status_effects : StatusEffect[]
-  rpg            : RPGSheet  # L4 — read-only to the engine
+  id, side                            # sides drive win/loss (a side loses when all its actors are KO'd)
+  pos        : FxVec2                 # position on the ground plane (fixed-point)
+  height_off : Fx                     # vertical offset (airborne arcs, juggles)
+  facing     : FxVec2                 # unit vector; auto-faces target when actionable
+  target     : EntityId               # every actor targets exactly ONE other actor (§3.2)
+  stance     : STANDING | CROUCHING | AIRBORNE | DOWN
+  state      : FREE | STARTUP | ACTIVE | RECOVERY | HITSTUN | BLOCKSTUN
+             | CRUMPLE | JUGGLE | GRABBED | DOWN | GUARDBROKEN | KO
+  ready_tick : int                    # when this actor next gets a free decision
+  current    : MoveInstance?          # in-flight move + contact bookkeeping + armor uses
+  combo      : ComboTracker           # hits taken this combo, decay level, extender latches (§6)
+  meters     : { hp, breath, guard, focus, ap }          # §9
+  latches    : { heat: Unused|Active(until)|Spent, rage: Armed|Triggered|Spent, burst_used }
+  statuses   : [StatusEffect]
+  moves      : MoveList               # compiled by L4; the engine treats it as opaque data
+  defense    : DefenseProfile         # compiled static ++ dynamic-from-statuses (see below)
+}
+
+DefenseProfile {
+  weight        : juggle gravity/decay modifier (heavier = shorter juggles) 🔬 Tekken body weight
+  block_arc     : frontal arc within which guarding works (§5.3)
+  guard_max, breath_max, ap_max, focus_max, hp_max
+  ch_vulnerability : multiplier hooks (statuses can raise it)
+  visibility    : per-meter visibility flags (what enemies may observe — default: HP only) ✅tunable
 }
 ```
 
-`ready_tick` is the mechanism that turns a continuous fight into turns: **the engine always asks the entity with the lower `ready_tick` to choose next.** Everything downstream is bookkeeping on that one idea.
+`ready_tick` remains the single idea that turns continuous combat into turns: **the engine
+always advances to the earliest pending decision and asks that actor's owner to choose.**
 
----
+## 2.4 The Ruleset — where "universal" numbers live ✅ (C-AUTH)
 
-# LAYER 1 — SPATIAL MODEL
-
-## 1.1 The grid — lane + Tekken sidestep ✅
-
-**Clarified model:** the spacing dimension is a **continuous 1D lane** (the distance axis between the two fighters — unchanged from before). Layered on top is a **shallow lateral/depth axis** for **Tekken-style sidestepping**: in addition to forward/back along the lane, a character can step *sideways* (into or out of the screen-depth), tracked by a scalar `offset`.
-
-The crucial point you made — *"still on a 1D lane"* — is honored precisely: **`offset` is not a second spacing axis.** Spacing, reach, and all the frame-data math still run on the 1D `pos` lane exactly as before. The `offset` axis does one job and one job only: **evasion.** It decides whether an attack's hitbox lines up with the defender, not how far apart they are.
-
-How the two axes divide labor:
-- **`pos` (lane / distance):** spacing, whiff-by-range, weapon reach, footsies, knockback. *(All of L1.2's math, untouched.)*
-- **`offset` (lateral / depth):** sidestep evasion. Stepping off-axis makes **linear** attacks miss; the counterplay is **tracking / homing** attacks (0.3) that realign. Fighters **auto-face** (re-orient toward each other) when actionable, so the lane re-establishes itself after a sidestep — `offset` matters mainly *during* an opponent's committed move, which is exactly when a sidestep dodges it.
-
-This keeps the one-to-one frame translation intact (spacing is still a scalar) while adding the Tekken layer you want. Because everything still flows through the single `does_hit` predicate (1.2), this is a localized extension — `spatial/lane.ts` only (App. A).
-
-🔬 In Tekken, sidestep beats *linear* moves and loses to *homing/tracking* moves, and moves often track better to one side than the other — that asymmetry (sidestep-left vs sidestep-right being different reads) is the depth this adds, and it's reproduced below.
-
-## 1.2 Reach and hitboxes ✅
+Cross-cutting curves can't live on any one move, but they may not live in engine code either.
+They live in a **Ruleset**, a content object loaded with the fight — swappable, versioned, and
+auditable like any other data:
 
 ```
-ReachProfile {
-  min_range    : float    # closer than this and the move whiffs (too close / over the head)
-  max_range    : float    # outer edge of the hitbox along the lane
-  height_low   : float    # vertical coverage (for anti-air / low attacks)
-  height_high  : float
-  advance      : float    # how far the attacker MOVES along the lane during startup+active
-  lateral_band : float    # half-width of the hitbox on the OFFSET axis.
-                          # |attacker.offset − defender.offset| must be ≤ this to connect.
-                          # LINEAR moves have a narrow band → a sidestep dodges them.
-  step_in      : float    # lateral realign during the move (TRACKING/HOMING > 0; LINEAR = 0)
-  track_side   : -1|0|+1  # which sidestep direction this move covers better (0 = both/none)
+Ruleset {
+  hitstun_decay   : per-combo-hit stun reduction schedule        # governor 1
+  juggle_decay    : per-juggle-hit damage schedule (× defender weight)  # governor 2
+  extender_latches: { screw: 1, bound: 1, wall_splat: 1 }        # per-combo allowances, governor 3
+  ch_default     : { damage_mult, stun_bonus }                   # used when a hit has no ch_reaction
+  guard_break_stun, throw_tech_recovery, block_reevaluate_every  # ⚠️ all tuning values
+  forced_landing : the juggle "gravity floor" rule (§6.5, governor 7)
+  ...
 }
 ```
 
-The engine's spatial contract is still **one predicate** (so 1D and lane+sidestep expose the same interface — nothing in L2 changes):
+Rule of placement: *an attack's effect* → on the HitEvent. *A defender's susceptibility* → in
+DefenseProfile. *A property of the fight itself* → in the Ruleset. The engine holds **zero**.
 
-```
-does_hit(attacker, defender, tick) -> bool
-  # true iff at `tick` the move is in an ACTIVE frame, AND:
-  #   (range)   defender ∈ [min_range, max_range] from attacker along the lane (after `advance`)
-  #   (height)  defender.height ∈ [height_low, height_high]
-  #   (lateral) |attacker.offset − defender.offset|  ≤  lateral_band + step_in
-  #             — i.e. a sidestep beyond the band makes a LINEAR move WHIFF;
-  #               TRACKING/HOMING add step_in to realign; track_side widens it on one side only
-  #   (type)    defender is not invuln to this move's type at `tick`
-```
+## 2.5 PropertyWindows (frame flags) ✅
 
-This makes **sidestep evasion a spatial fact, just like backdash whiffing** — it routes through the exact same `on_whiff = 0` → "you eat full recovery, now you're exposed" path. A read-based sidestep on a linear heavy is therefore a *whiff-punish setup*, identical in structure to baiting a whiff with footsies.
+Unchanged in spirit from v1; each property is live during an inclusive tick window relative to
+the move's start:
 
-## 1.3 Movement ✅
-
-Movement is just a move with a FrameProfile (so it lives on the same timeline and can be whiff-punished — committing to a big dash has recovery!).
-
-| Movement | startup | active(moving) | recovery | notes |
-|---|---|---|---|---|
-| **Step** (short) | 1 | `n` | 1 | cheap spacing adjustment |
-| **Dash** (commit) | 3 | `n` | 6 | covers ground fast, punishable |
-| **Backdash** | 3 | `n` | 8 | often has i-frames on early startup 🔬 (universal in fighters) |
-| **Jump** | 4 (prejump) | airborne arc | landing recovery 4 | enters AIRBORNE |
-| **Hop / microdash** | 2 | `n` | 3 | mobility tool |
-| **Sidestep L / R** | 3 | 2 | 7 | quick lateral hop: sets `offset` off-axis to dodge **LINEAR** moves; loses to TRACKING/HOMING; punishable on whiff. L vs R are distinct reads (see `track_side`). |
-| **Sidewalk L / R** | 2 | `n` (hold) | 5 | sustained lateral movement; covers more `offset` than a step but is slower to recover and more exposed. |
-
-After any sidestep/sidewalk, **auto-facing** re-centers the lane once you're actionable (1.1), so `offset` evasion is a *timing tool used against a committed move*, not a permanent position. A sidestep that beats a linear attack puts you at advantage exactly like a whiff-punish.
-
-Distance covered = `speed_stat × active_ticks` (L4 supplies `speed_stat`). Because movement consumes ticks on the shared clock, **repositioning has an opportunity cost** — you cannot reposition for free, which is what makes neutral a real decision.
+| Property | Effect during window | Ported from |
+|---|---|---|
+| `INVULN{type}` | Matching attacks pass through (ALL / STRIKE / THROW / PROJECTILE). | reversals, backdash i-frames |
+| `ARMOR{hits, dmg_mult, covers}` | Absorb N hits of covered heights without stun; still take scaled damage. Throws and (by default) LOWs go through. | 🔬 Tekken Power Crush |
+| `GUARD_POINT{covers}` | Auto-deflect one covered strike → parry outcome (§5.5). | 🔬 Tekken sabaki |
+| `CH_STATE` | Being struck here is a counter-hit (extends the startup/recovery default). | universal CH rules |
+| `CANCELABLE` | See §11. | combo cancels |
+| `HEAT_ENGAGER` | On hit, the attacker enters Heat (§9.5). | 🔬 Tekken 8 |
+| `PROJECTILE_SPAWN{spec}` | Emits an independent projectile entity (§10.3). | zoning |
 
 ---
 
-# LAYER 2 — THE COMBAT ENGINE (the heart)
+# §3 LAYER 1 — THE SPATIAL MODEL (target-lanes in a 3D arena)
 
-This is the near one-to-one translation you asked for. I'll give the **resolution loop** first (your 5-step flow, formalized and made consistent), then the **interaction rules** (block/parry/throw/CH/juggle) that the loop calls into.
+## 3.1 The arena ✅
 
-## 2.1 The fundamental question: who chooses next? ✅
+The arena is a bounded region of a 2D **ground plane** (rendered in 3D; simulated in
+fixed-point), plus a vertical axis used only for airborne arcs and height bands. An `ArenaDef`
+authors: the floor boundary, **wall segments** (with per-segment properties: solid / splat-able /
+breakable), and **hazard volumes** (authored contact events — e.g. *overboard*: damage + a
+status + repositioning). Hazards are arena **data**, never engine rules. ✅
 
-At any moment the engine is in one of two **decision regimes**, determined entirely by `ready_tick`:
+## 3.2 The target creates the lane ✅ (the core spatial idea)
 
-- **NEUTRAL (simultaneous regime):** both entities are actionable at the same tick (`ready_tick` equal, or both ≤ `T`). → Both commit **simultaneously and hidden**, then reveal. This is the neutral-game mind read.
-- **PRESSURE (sequential regime):** one entity is actionable and the other is *not* (locked in a move, hitstun, blockstun, or recovery). → The actionable entity chooses **with full information** about what the other is locked into and for how long. This is offense/okizeme/punishing.
+Every actor has exactly **one target**. The segment from actor to target is that actor's
+**lane**: all spacing mathematics — range, advance, knockback, "the gap" — runs along it, and
+the lateral axis (sidestep evasion) is perpendicular to it. This is precisely v1's `pos`/`offset`
+1D-lane model applied **per pair**: the two-fighter game is the special case where both lanes
+coincide. The translation of Tekken footsies therefore carries over untouched; what's new is
+that there are several lanes in the arena at once.
 
-> **Why this is the elegant core:** in a real fighter, "neutral" is when both players are free and reading each other; "pressure" is when one is plus and acting on a known-disadvantaged opponent. By keying the regime off `ready_tick`, *the same timeline produces both* with no special-casing. This is the consistency keystone of the whole engine.
+- **Facing**: an actionable actor auto-faces its target. Facing only changes while you are
+  actionable (or via a move's authored motion) — a committed or reeling actor keeps its facing,
+  which is what makes flanking and back attacks (§8.3) possible.
+- **Retargeting**: choosing a target is part of committing any action ("do X *at* Y"). There is
+  also a near-free `switch_focus` utility move (a few ticks ⚠️) for purely defensive re-facing.
+- The chosen option is deliberately simple — *"everyone targets one person; the target creates
+  the lane"* — and is flagged for revisit after the first party-combat playtest. ✅user-locked
 
-## 2.2 The resolution loop ✅ (your 5-step flow, formalized)
+## 3.3 `does_hit` — still one predicate ✅
+
+The whole spatial model stays behind a single contact predicate. For each active HitEvent of
+each attacker, against **every** legal victim (not just the attacker's target — bystanders can
+absolutely be clipped by a wide cleave or a beam):
+
+```
+does_hit(attacker, move, hit, victim, T) -> bool
+  (phase)    T is inside the hit's active ticks
+  (type)     victim not INVULN to this category at T
+  (range)    victim's position, projected onto the attacker's facing axis,
+             lies within [min_range, max_range] (after the move's advance so far)
+  (arc)      victim lies within the move's horizontal arc / lateral band about that axis
+             — LINEAR moves have a narrow band; TRACK_*/HOMING widen or realign it (§3.5)
+  (height)   victim's current height band (stance + height_off) intersects the hit's band
+             — a HIGH whiffs entirely over a CROUCHING victim (§5.2)
+```
+
+A sidestep that takes you off an attacker's narrow LINEAR band routes through the exact same
+`on_whiff = 0 → full recovery → exposed` path as a baited whiff: **lateral evasion is a
+whiff-punish setup, structurally identical to footsies.** (Unchanged from v1 — audit C-7/C-8.)
+
+## 3.4 ReachEnvelope ✅
+
+```
+ReachEnvelope {
+  min_range, max_range      # along the facing axis (min_range > 0 = "whiffs point-blank")
+  arc_halfwidth             # lateral half-width at max_range (narrow = LINEAR-feeling)
+  height_band               # LOW / MID / HIGH coverage + anti-air extents
+  advance                   # ground covered during startup+active (committal forward motion)
+  step_in, track_side       # tracking realignment (§3.5)
+}
+```
+
+Beams (§10.3) are just very long, very narrow envelopes. Sweeps are short, very wide arcs that
+naturally hit multiple actors. Party-relevant region size is **priced by the budget** (§13).
+
+## 3.5 Tracking vs lateral movement ✅ 🔬
+
+The Tekken triangle, generalized to the plane:
+
+- **LINEAR** — narrow band; a sidestep (perpendicular hop relative to *the attacker's* lane)
+  evades it. Cheap on the budget.
+- **TRACK_L / TRACK_R** — realigns against steps to one side only; stepping the *other* way
+  evades. The asymmetric read (SSL vs SSR are different guesses) is reproduced exactly.
+- **HOMING** — realigns both ways; beats stepping outright, pays for it on the budget and is
+  usually slower or weaker.
+
+## 3.6 Movement ✅
+
+Movement is just a move with a FrameProfile (so it lives on the timeline and is whiff-punishable):
+step, dash, backdash (early i-frames 🔬), sidestep L/R, sidewalk, crouch (a held stance, §5.2),
+jump (enters AIRBORNE; the air game beyond juggles is deliberately out of slice scope ⚠️).
+Distances are authored per move and scaled by the compiled speed lever. Because movement spends
+ticks on the shared clock, repositioning is never free — neutral stays a real decision.
+
+## 3.7 Walls, splats, hazards ✅ 🔬
+
+Knockback and juggle arcs that would carry a victim through a wall instead produce a
+**WALL_SPLAT** (a stuck, juggleable state — §6.2) if the combo's wall-splat latch is unspent,
+else clamp to pushback. Breakable segments author a one-time event (arena extension, debris,
+bonus state). Hazard volumes fire their authored event on contact. Wall pressure and carry are
+a core Tekken depth axis and the main reason arenas are bounded. ✅
+
+---
+
+# §4 LAYER 2 — THE ENGINE (scheduler & resolution)
+
+## 4.1 Decision points ✅
+
+The engine advances `T` tick-by-tick, resolving contacts and motion, and **pauses** whenever any
+actor has a decision. Decision kinds:
+
+| Kind | Who | When | Choices |
+|---|---|---|---|
+| **Ready** | a free actor | `ready_tick == T` | any affordable, requirement-met move (incl. WAIT, Guard, movement) |
+| **Cancel** | an actor in a cancel window | window open & gate satisfied | take a listed cancel (pay) or decline |
+| **Reaction** | a defender | event-opened (below) | a state-gated option or pass |
+| **Wake-up** | a DOWN actor | wake timer | rise / back-rise / delayed rise / any `state=DOWN` move (incl. reversals) |
+
+**Reaction windows** unify the defender-side prompts: a **throw connecting** opens a break
+prompt (§5.4); **each combo hit landing** opens a burst prompt for the victim *if* burst is
+affordable and unused (§8.5) — otherwise it auto-passes silently (no UI spam, no information
+generated). Blocked hits may open costed block-option prompts in future iterations (deferred ⚠️).
+
+## 4.2 Side-blind simultaneous commits ✅ (the fairness rule)
+
+All decisions pending at the same tick `T` are collected and grouped **by side**. Each side
+commits all of its actors' choices *without seeing the other side's same-tick commitments*; your
+own side's pending choices are mutually visible while you compose them (you're one mind giving
+orders). Then the tick executes everything at once.
+
+This generalizes v1's NEUTRAL-regime hidden commit to N actors — and because intent is *always*
+fogged in v2 (§7), the old NEUTRAL/PRESSURE information split disappears entirely. What survives
+of "pressure" is physical: a reeling, blocking, or committed opponent factually cannot act, and
+you can see *that* (it's observable state), so offense on a locked opponent plays exactly like a
+fighting game's plus-frames — you just read their wake-up option instead of being told it.
+
+Deterministic same-tick effect ordering: stable entity-id order, with simultaneity rules
+(throw-vs-throw → tech; trade hits both resolve) handled in the resolver — order never decides
+a winner where the rules define a clash. ✅
+
+## 4.3 The advance loop ✅
 
 ```
 loop:
-  # 1. Determine regime
-  actor_set = entities with minimal ready_tick (1 = pressure, 2 = neutral)
-
-  if regime == NEUTRAL:
-      # (1) you commit, (2) opponent commits — simultaneously, hidden
-      a_choice = entityA.commit()        # choose a move (or movement, or wait)
-      b_choice = entityB.commit()        # hidden until both locked
-      reveal(a_choice, b_choice)
-
-  else: # PRESSURE
-      choice = actor.commit()            # full info: sees opponent's lock & remaining ticks
-
-  # (3) CANCEL WINDOW — offered DURING execution, see 2.3 and L3
-  #     handled inside the tick advance below, not as a separate phase
-
-  # (4) EXECUTE: advance the global clock tick-by-tick, resolving contacts
-  advance_until_next_decision()
-
-  # (5) COOLDOWN: recovery is already part of each move's FrameProfile;
-  #     ready_tick was set when the move was committed.
-
-  if combat_over: break
+  pump_decisions(T)                 # gather same-tick decisions, side-blind commit, apply
+  step_tick(T):
+    for each in-flight move: update phase (STARTUP→ACTIVE→RECOVERY)
+    for each active HitEvent × victim: if does_hit → resolve_contact (§5.1)
+    integrate motion (advance, knockback, juggle arcs, projectiles), clamp to arena, walls (§3.7)
+    tick statuses, stun timers, latch durations (Heat), meter regen (Breath)
+    check KO / side elimination
+  T += 1
 ```
 
-### `advance_until_next_decision()` — the tick engine ✅
-
-This is the literal interpreter. It steps `T` forward one tick at a time and stops the instant a player needs to make a decision (a cancel window opens, or someone becomes actionable). Stepping one tick:
-
-```
-for each tick T:
-  for each entity with an in-flight move:
-     update phase (STARTUP→ACTIVE→RECOVERY) based on elapsed ticks
-     apply active-frame contacts:
-        for each ACTIVE attacker:
-           if does_hit(attacker, defender, T):   # L1 predicate
-              resolve_contact(attacker, defender, T)   # → 2.4
-     move entity by its per-tick velocity (movement / advance / knockback)
-     tick down status_effects, stun timers, projectile lifetimes
-
-  # decision checkpoints:
-  if any entity entered a CANCEL window this tick: PAUSE → offer cancel (2.3)
-  if any entity's ready_tick == T (became actionable): PAUSE → return to loop
-```
-
-**No real-time constraint** falls out for free: the engine pauses at every checkpoint and waits for human input indefinitely. The *tick clock* is the only clock.
-
-## 2.3 Cancels — your step (3) ✅
-
-A **cancel** lets you interrupt your own move during a marked window and chain into another move, paying its cost and resetting the timeline from that point. This is how combos, frame traps, and blockstring pressure exist (full mechanics in L3.4). The engine-side contract:
-
-- Cancels are only offered when `T` is inside a `cancel_window` of your in-flight move **and** the cancel's gating condition is met (e.g., "on hit only," "on block only," "always," "only if it connected").
-- Accepting a cancel **truncates the current move's recovery** and starts the new move's startup immediately at `T`. This is exactly why canceling a move's recovery into another move creates plus frames / combos.
-- Declining lets the move finish normally.
-- ⚠️ The hardest fairness question in the whole system lives here: **in the NEUTRAL regime, do you get to see the opponent's revealed move before deciding your cancel?** See 2.10 — this is the one place the simultaneous model needs a careful rule, and I've specified a default.
-
-## 2.4 `resolve_contact` — what happens when a hitbox meets a hurtbox ✅
-
-When `does_hit` is true at tick `T`, the defender's *current state* decides the branch:
-
-```
-resolve_contact(attacker, defender, T):
-  if defender is INVULN to this type:        → whiff (no effect)        # i-frames win
-  if defender is in PARRY window:            → PARRY (2.6)              # parry beats strike
-  if defender is BLOCKING (correct height):  → BLOCK (2.5)              # block beats strike (chip/stun)
-  if defender is BLOCKING (wrong height):    → it's a HIT (mixup landed)
-  if defender has ARMOR (hits remaining):    → ARMORED (take dmg, no stun, continue)
-  else:                                      → HIT (2.7)
-  # throws are resolved separately (2.6) because they ignore block
-```
-
-This ordered branch *is* the interaction priority table. Read top to bottom, it encodes "invincibility > parry > block > armor > clean hit."
-
-## 2.5 Blocking ✅
-
-- Blocking is a **stance**, itself a move with a FrameProfile: `startup` (a few ticks to raise guard — you cannot block instantly, which is what makes mixups work), `active` (holding guard, can be held across ticks), `recovery`.
-- Block has a **height requirement**: `HIGH`/`MID` blocked by standing block, `LOW` blocked by crouch block, `OVERHEAD` only by standing, `THROW` not blockable at all. Guessing wrong = clean hit. This is the strike/throw/high/low **mixup**.
-- On a blocked hit: defender takes **chip damage** (small, → a resource, not HP — see L3 poise), enters **blockstun** for `blockstun` ticks, and the attacker gets `on_block` frame advantage.
-- **Guard meter / Guard break:** repeated blocking drains a **Poise/Guard** resource. At zero → **GUARDBROKEN** (a long fully-punishable stun). This prevents "just block forever" and rewards offense. (Resource defined in L3.)
-
-## 2.6 Throws and parries — closing the RPS ✅
-
-The classic fighting-game triangle, preserved exactly:
-
-| If attacker does… | …and defender is… | Result |
-|---|---|---|
-| **Strike** | Blocking | Blocked (attacker safe-ish, chip) |
-| **Strike** | Parrying | **Parried** (attacker fully punishable) |
-| **Throw** | Blocking | **Thrown** (throws beat block) |
-| **Throw** | Throwing (same tick) | **Throw tech** (clash, both reset, no damage) |
-| **Strike** | Throwing | **Strike wins** (throw has startup; strike counter-hits the throw whiff) |
-
-- **Parry:** a move with a *short active window* and the `guard-point`/parry property. If a strike connects during the window → attacker is frozen in a long recovery (huge plus for defender). High risk (tight window, bad if you guess throw), high reward. ⚠️ Whether parry is a pure-defense option or also a resource generator (e.g., refunds Focus) is a tuning lever — default: parry refunds a small amount of Focus to reward the read.
-- **Throws** ignore block, have short range (`max_range` small), and **cannot be canceled into** (no throw combos from nothing). They are the answer to a turtling/blocking opponent. They lose to strikes (startup) and to backdash (spacing) and to jump (throws are usually grounded). This is what keeps any single defensive option from dominating — the balance argument is in §B.
-- **Sidestep** (1.1, 1.3) is the *lateral* defensive option: it dodges **LINEAR** strikes entirely (they whiff via the lateral check in `does_hit`) and sets up a whiff-punish, but loses to **TRACKING/HOMING** strikes and does nothing against throws (throws are short-range and realign on auto-facing). So the attacker's counter to a step-happy defender is to mix in homing moves — which are typically slower or weaker per the budget (4.5), so they pay for that coverage. This is the Tekken layer of the RPS.
-
-> This interaction (**strike / throw / block / parry / backdash / sidestep**) is the rock-paper-scissors that makes the neutral game non-trivial. Each defensive option is beaten by something: block loses to throw, parry loses to throw/empty, backdash loses to advancing/long moves, sidestep loses to homing. The audit (§B) checks that none strictly dominates.
-
-## 2.7 Hit, hitstun, counter-hit ✅
-
-On a clean hit:
-- Defender takes `hit_effect.damage` (L4 scales this), enters **hitstun** for `hitstun` ticks, may be pushed back (`knockback`) or launched (`AIRBORNE`).
-- Attacker gets `on_hit` frame advantage (per invariant I-1).
-- **Counter-hit (CH):** if the defender was in a `counter-hit state` (i.e., in startup/recovery of their *own* move) when hit, apply `ch_damage_mult` (default ×1.25) and `ch_hitstun_bonus` (default +6 ticks). CH is what rewards whiff-punishing and frame traps — it's the payoff for winning the timing read. 🔬 Universal in fighters.
-
-## 2.8 Juggles and knockdown ✅
-
-- A **launcher** puts the defender in `AIRBORNE`. While airborne they can be hit again (juggle).
-- **Gravity scaling / juggle decay:** each successive hit in a juggle applies a decreasing damage multiplier (`juggle_damage_decay`, default 0.9^n) and reduces remaining hitstun, so combos terminate. This is the anti-infinite rule. (Consistency check in §B: confirm no move loops into itself with net ≥0 advantage and no decay — that's the infinite-combo failure mode.)
-- **Knockdown → Okizeme:** a knockdown puts the defender `DOWN` with a wake-up timer. The attacker is actionable first (pressure regime) and can set up a mixup on wake-up. Defender gets a **wake-up reversal** option (an invincible-startup move, if they have one and can pay for it) — the classic "get-off-me" tool. This keeps offense from being a free win after one knockdown.
-
-## 2.9 Projectiles / zoning ✅
-
-A projectile is an **independent timeline entity** spawned by the `projectile-spawn` property: it has its own `pos`, velocity, lifetime, and a one-active-tick-per-cell hitbox. It lives on the same global clock. This gives you zoning (throw fireball, control space) and the counterplay (jump over, reflect via guard-point, race it with your own). ⚠️ Follow-up only if you want projectile-heavy archetypes; otherwise the default single-projectile-per-caster rule is enough.
-
-## 2.10 The one genuinely hard rule: information in the neutral regime ✅ (with ⚠️ flag)
-
-In the PRESSURE regime there's no ambiguity — the actor sees everything. The subtlety is **NEUTRAL**, where both commit hidden. The question your step (3) raises: *after the reveal, can I cancel in reaction to what I now see?* If yes without limit, the second-mover always wins (no real commitment). If never, you lose the fighting-game "confirm" (hit-confirming a combo only when it actually lands).
-
-**Specified default — the "lock then confirm" rule:**
-1. Both players commit hidden (the *initial* move only). Reveal.
-2. The timeline runs. **You may only cancel at a cancel-window checkpoint, and a cancel that is gated `on_hit`/`on_block` is decided by the actual contact result** — i.e., you *can* hit-confirm (cancel only if it connected) because by then the contact is a fact, not a read. But you **cannot** retroactively change your *initial* committed move after the reveal.
-3. To prevent "react to reveal by canceling startup," **startup cancels are disallowed by default** (you can only cancel from active/recovery, i.e., after your move has committed to contact). Special moves may be flagged `startup-cancelable` as a deliberate, costed exception.
-
-This preserves genuine commitment (you chose your poke blind) while keeping the skill of confirming (you only spend resources to combo when the hit is real). 🔬 This mirrors how confirms work in real fighters: you react to *hit/block*, not to the opponent's input. ⚠️ Confirm you're happy with "no startup cancels by default"; it's the cleanest anti-degenerate rule but it's a real design choice.
+The match result, trace, and every intermediate state are a pure function of
+(initial state, content + Ruleset, the decision log) — C-DET. The **trace** (every commit,
+contact, reaction, and state change as tagged events) remains the behavioral contract that the
+future golden vectors v2 will freeze.
 
 ---
 
-# LAYER 3 — MOVESET, RESOURCES, CANCELS
+# §5 CONTACT RESOLUTION
 
-## 3.1 Resources ✅
+## 5.1 The priority table ✅
 
-Resources gate moves and create pacing. Four core meters (modular: add/remove without touching the engine, since the engine only reads `resources[name]`).
-
-| Resource | Regenerates? | Spent on | Purpose / what it prevents |
-|---|---|---|---|
-| **Stamina** | Yes, per tick when NEUTRAL (not while attacking) | Most attacks, dashes, blocking-while-hit | Prevents mashing; spacing to recover stamina becomes a decision. Soulslike flavor. |
-| **Poise (Guard)** | Slowly; resets on knockdown | Absorbing blocked hits | Guard-break system (2.5); caps pure turtling. |
-| **Focus** | On parry/CH/whiff-punish (skill-rewarding) | Special moves, cancels, reversals | The "earned offense" meter; ties skill expression to resource. |
-| **Action Points (AP)** | Refreshes each time you (re)gain initiative, up to `AP_max`; some moves *generate* AP (3.5) | Every action has an AP cost; long pressure/combo strings spend more | The **action-economy / tempo** layer (3.5): caps how much you do per turn; AP-generating moves are the reward for clever sequencing. |
-| **Health (HP)** | No (only via items/skills out of combat) | — | Lose condition. |
-
-🔬 Stamina-gated attacking + a poise/guard system is the recognizably *Dark Souls* layer grafted onto fighting-game frame data — which is exactly the fusion you described.
-
-> **Balance rule R-1 (resource economy):** every offensive option costs a resource that is hardest to regenerate while attacking, and every defensive option either costs or drains one. There is **no zero-cost dominant action**. The audit verifies this per-archetype.
-
-## 3.2 Move taxonomy ✅
-
-| Class | Typical frame shape | Resource | Gated by (L4) | Role |
-|---|---|---|---|---|
-| **Normal (light)** | fast startup (3–6), low recovery, small `on_block` (−2..+1) | Stamina (low) | weapon proficiency | pokes, neutral, frame traps |
-| **Normal (heavy)** | slow startup (12–20), high reward, minus on block | Stamina (high) | Strength req | whiff-punish, CH fishing |
-| **Command normal** | mid startup, special property (overhead/low) | Stamina | weapon | mixup tools |
-| **Special** | varies; unique properties (i-frames, armor, projectile) | Focus | Skill rank + Focus | archetype identity |
-| **Reversal** | invincible startup, huge recovery if whiffed | Focus (high) | Skill + Focus | wake-up / get-off-me |
-| **Throw** | short startup, short range, unblockable | Stamina | Strength (for damage) | anti-turtle |
-| **Movement** | see L1 | Stamina (small) | speed_stat | spacing |
-
-## 3.3 The MoveList (interface to L4) ✅
+When `does_hit` is true, the defender's state decides the branch — read top-to-bottom, this *is*
+the interaction priority:
 
 ```
-MoveList = Move[]
-Move {
-  id, name, class
-  base_profile : FrameProfile          # the move's "naked" frame data
-  requirements : { attr/skill/equipment gates }   # L4 decides if usable
-  scaling      : ScalingRule[]          # how L4 stats modify base_profile → resolved profile
-}
+resolve_contact(attacker, hit, defender, T):
+  1. defender INVULN to category            → WHIFF
+  2. category == THROW:
+       defender also throwing this tick     → THROW_TECH (clash; both reset)
+       defender GRABBED-able (standing/crouch-throws per reqs)
+                                            → GRAB CONNECT → opens the break reaction window (§5.4)
+  3. defender in GUARD_POINT covering it    → PARRIED (§5.5)
+  4. defender guarding & facing it (§5.3):
+       height covered by current guard      → BLOCKED (chip to Guard, blockstun, on_block)
+       height not covered (the mixup)       → HIT
+  5. defender ARMOR covering it, hits left  → ARMORED (scaled damage, no stun, move continues)
+  6. otherwise                              → HIT (counter-hit if defender in CH state)
 ```
 
-**This is the entire contract between the RPG layer and the engine.** L4 takes `base_profile`, applies `scaling`, checks `requirements`, and emits a *resolved* `FrameProfile` the engine runs. The engine never sees a stat.
+## 5.2 Heights & stances — Tekken logic ✅ 🔬
 
-## 3.4 Cancels — full rules ✅
+v1's SF-style OVERHEAD level is **dropped**. The Tekken triangle:
 
-```
-CancelWindow {
-  from_tick, to_tick           # relative to the move
-  gate : ON_HIT | ON_BLOCK | ON_CONTACT | ALWAYS | ON_WHIFF
-  into : [move_ids] | CATEGORY # what you may cancel into
-  cost : ResourceCost          # usually Focus; this is why combos are finite
-}
-```
+- **HIGH** — fast, safe, often CH tools. **Whiffs entirely over a CROUCHING victim** (not
+  blocked — *missed*), which is what makes ducking a read with a launch-punish payoff.
+- **MID** — hits crouchers; blocked only by standing guard. The vertical "overhead" threat.
+- **LOW** — hits standers; blocked only by crouching guard; typically seeable (slower cues) but
+  rewarding. 🔬 Tekken lows are reads, not reactions — which suits a no-execution game perfectly.
 
-- **Chain/link cancels** (light→light) build small combos cheaply (Stamina).
-- **Special cancels** (normal→special) are the bread-and-butter combo enabler, cost Focus.
-- **Super/Reversal cancels** cost the most.
-- **Whiff-cancel** (cancel the recovery of a *whiffed* move) is powerful and should be rare/expensive — flagged for the audit as a degeneracy risk.
+**CROUCHING** is a held stance (a STANCE move, like Guard): it ducks highs *passively* and
+changes which guard you can hold. Moves may require or grant stances (`reqs.stance`), giving
+Forms crouch-mixup identities without engine special cases.
 
-**Combo termination is guaranteed by four independent governors** (defense in depth, so no single tuning miss creates an infinite): (1) Focus cost per cancel; (2) juggle damage/hitstun decay (2.8); (3) **hitstun decay** — each chained hit slightly reduces the next move's effective `on_hit`, so eventually advantage goes negative and the combo *must* end; and (4) **AP exhaustion** (3.5). The audit checks all four are present and that no loop nets ≥0 advantage at zero net resource cost.
+## 5.3 Blocking — a facing-relative stance ✅
 
-## 3.5 Action Economy — Action Points (AP) ✅
+Guard is a held STANCE move: brief startup (you cannot block instantly — mixups must work),
+open-ended hold, brief release. While guarding:
 
-This is the requested action-economy layer. It is a **distinct strategic axis from the tick clock**, and deliberately does *not* duplicate any existing resource. Keep this division clear:
+- Strikes arriving **within your `block_arc`** and matching your guard height are BLOCKED:
+  chip drains the **Guard** meter (not HP), you take blockstun, attacker gets `on_block`.
+- Attacks from outside the arc — **back and deep flank hits — cannot be blocked or parried.**
+  Facing is therefore a defensive resource, and choosing a target doubles as choosing what you
+  can defend (§8.3).
+- **Guard meter at zero → GUARDBROKEN**: a long, fully punishable stun (Ruleset-authored
+  duration), the anti-turtle terminus. Guard regenerates slowly while not blocking.
+- While holding guard you re-decide at an authored interval and whenever an event touches you
+  (blockstun resolving, etc. — §4.1), so turtling never stalls the turn flow. ⚠️ interval tuning
 
-- **Ticks** = the *physics*. Real time on the shared clock — governs spacing, whiff-punishing, who is actionable. (L0–L2.)
-- **AP** = the *tempo / turn-budget*. A TTRPG-style action economy that governs **how many actions you may chain before initiative is re-evaluated**, independent of raw time.
-- **Focus** = *access to power*. Whether you can afford a given special at all.
-- **Stamina** = *exertion*. Whether your body can keep swinging.
+## 5.4 Throws & the directional break ✅ 🔬
 
-A combo/pressure string can therefore end for four *strategically different* reasons — out of AP (tempo), out of Focus (can't afford the next special), out of Stamina (exhausted), or hitstun decayed (the next hit won't connect). Each answers a different question, so they enrich rather than overlap.
+Throws ignore guard and armor, have short envelopes, realign on auto-facing (sidestep does not
+escape a committed-to-range grab; spacing and strikes do), and **cannot be canceled into**.
 
-### 3.5.1 The model ✅
+When a grab connects, the defender gets a **reaction window**: guess the throw's authored
+`break_key` — **L or R** — or decline. Correct guess → THROW_TECH (clash, both recover, small
+separation); wrong or declined → THROWN (the throw's HitEvents run: damage, knockdown, oki).
+🔬 This is Tekken's 1/2 break read with the dexterity removed and the *guess* kept. At knowledge
+tier 3 (§7.3) the UI shows a grab's break key during its cue — studied opponents get their
+throws broken, exactly like high-level Tekken. Command grabs may author `break_key: NONE`
+(unbreakable) and pay heavily for it on the budget (§13).
 
-```
-AP fields on every move (part of ResourceCost):
-  ap_cost : int    # AP consumed to perform this action (≥ 0)
-  ap_gain : { amount: int, gate: ON_HIT | ON_CH | ON_BLOCK | ON_PARRY | ALWAYS }
-                   # AP generated, conditionally — this is "moves that generate extra AP"
+Same-tick mutual throws → THROW_TECH automatically (unchanged from v1).
 
-Per entity:
-  ap        : current pool
-  AP_max    : cap (stat-derived, 4.2)
-  ap_refill : amount restored each time you (re)gain initiative (default = AP_max; see tuning)
-```
+## 5.5 Parry / guard point ✅
 
-**How it plays, by regime** (ties directly to 2.1):
+A `GUARD_POINT` window deflects one covered strike: the attacker is frozen in an authored freeze
+(on the *parry move's* data — C-AUTH), the parrier recovers fast and typically banks Focus/AP
+(authored gains). High risk (tight window, loses to throws and to the uncovered height), high
+reward. Parries are Form identity pieces, not universal mechanics.
 
-- **NEUTRAL (simultaneous):** you commit **one** action. It spends its `ap_cost`. You do **not** chain in neutral because the opponent is also free — there's no locked target to string against. So AP barely constrains neutral; it mostly *accrues* there.
-- **PRESSURE (you have initiative on a locked opponent):** this is where the action economy lives. You may **chain a string of actions**, paying `ap_cost` for each, **as long as you can afford the next one and a cancel/link window allows it**. When you can't (or choose not to) pay, your turn yields and initiative re-evaluates by `ready_tick`. This is exactly how combos and blockstring pressure are bounded: **a long combo is literally an AP expenditure.**
+## 5.6 Counter-hit ✅ 🔬
 
-### 3.5.2 Moves that generate AP — the requested mechanic ✅
-
-Certain moves carry `ap_gain`, refunding/generating AP under a condition. This creates the core decision you asked for — *spend a big AP-sink finisher now, or play an AP-positive link to keep the string alive for more*:
-
-| Example move | ap_cost | ap_gain | Effect on play |
-|---|---|---|---|
-| **Light poke** | 1 | +1 `ON_HIT` | Net-neutral *on hit* — confirms keep your turn alive; whiffs cost you tempo. |
-| **Tempo jab / "gap-closer"** | 1 | +2 `ON_CH` | Rewards frame traps: landing a counter-hit *refunds* tempo, extending pressure. |
-| **Heavy finisher** | 3 | 0 | Big payoff, ends the string (AP-negative by design). |
-| **Special (launcher)** | 2 | +1 `ON_HIT` | Enough refund to permit *one* juggle follow-up, not an endless loop. |
-| **Parry** | 0 | +2 `ON_PARRY` | A read-based parry *generates* tempo, turning defense into a long punish turn. |
-| **Perfect block / just-guard** | 0 | +1 `ON_BLOCK` | Defensive skill expression: a tightly-timed block banks tempo for your own offense. |
-
-> **Design intent:** AP-generation is **conditional on success** (mostly `ON_HIT`/`ON_CH`/`ON_PARRY`), never unconditional. You earn extra actions by *playing well*, not by mashing. This is the "skill → reward" loop expressed in the action economy, paralleling how Focus is earned.
-
-### 3.5.3 The anti-degeneracy rule ✅ (critical for balance)
-
-> **Balance rule R-5 (no net-positive AP loop):** for any sequence of actions that can chain into itself, the **sum of `ap_gain` must be strictly less than the sum of `ap_cost`.** Equivalently: no move may refund ≥ its own cost on a gate it can satisfy by hitting the *same* follow-up it loops into. Concretely — a move with `ap_gain ≥ ap_cost` may **not** be in its own (transitive) cancel/link target set.
-
-This guarantees every string is finite *on the AP axis alone*, independent of the other three governors. It's the action-economy analogue of juggle decay, and the audit (§B, C-10) checks it by scanning the cancel graph for positive-weight cycles.
-
-### 3.5.4 Stat tie-in (resolved cleanly, no double-dip) ✅
-
-Per **balance rule R-2** (one major lever per attribute), AP is assigned to the attribute that was thinnest in combat before: **Charisma**. This gives CHA a real, distinctive identity — *the tempo / action-economy attribute* — rather than being a near-dump stat. CHA now governs `AP_max` and `ap_refill` (a high-CHA "tempo" build out-*actions* you), which sits coherently beside CHA's existing pressure/feint/intimidate kit. See updated 4.2. ⚠️ The exact curve (`AP_max = 3 + tier(CHA)`, `ap_refill`, whether unused AP partially carries over) is a playtest tuning table — flagged, not asserted.
+A defender struck during its own move's startup/recovery (or an explicit `CH_STATE` window) is
+**counter-hit**. The hit's `ch_reaction` runs instead of `reaction` — this is how Tekken-style
+**CH launchers** exist ("this jab is +1; this CH stuns into a full combo") — and if no override
+is authored, the Ruleset default (damage mult + bonus stun) applies. CH is the payoff for
+whiff-punishing and frame traps; it is also the **strike answer to throws** (a striking defender
+beats an incoming grab's startup).
 
 ---
 
-# LAYER 4 — THE RPG LAYER (stats → frame data, and gating)
+# §6 HIT REACTIONS & THE COMBO SYSTEM
 
-This layer answers your point 3: **stats feed into the system AND gate moves, D&D-style, with equipment.** Base system is Worlds Without Number-flavored (your stated lean), adapted so its outputs are *frame-data modifiers* rather than d20 attack rolls — because in this game, "did I hit" is decided by **spacing and timing (the engine), not a die.** That's the key adaptation and I want to flag it explicitly.
+## 6.1 The Reaction union ✅
 
-## 4.1 Why dice mostly leave combat ✅ (important design decision)
+What a hit *does* to its victim is an authored value, exhaustively matched by the engine:
 
-🔬 In WWN, skills use **2d6 + attribute mod + skill rank** vs. a target number, and combat uses a d20 to-hit vs. AC. **In this game, the engine already decides hit/miss deterministically via the timeline + hitboxes.** Re-rolling a d20 on top would double-resolve and destroy the fighting-game skill expression (you could whiff-punish perfectly and still "miss" to a die — anti-fun).
+```
+Reaction =
+  | Hitstun(n)                # standard reel; n decays per combo hit (governor 1)
+  | Crumple(n)                # slow stagger→collapse; juggleable standing-state pickup window
+  | Launch(arc)               # airborne; enters JUGGLE (the combo starter)
+  | Screw                     # juggle extender: flattens the arc, extends carry — ONCE per combo 🔬 T7 tailspin
+  | Bound                     # juggle extender: slams to a bounce, re-juggleable — ONCE per combo 🔬 T6 bound
+  | Knockdown(soft)           # techable knockdown (quick-rise options)
+  | Knockdown(hard)           # untechable; full oki
+  | Push(dist)                # pure separation (also: blocked-hit pushback)
+```
 
-**Decision:** combat hit/miss is **deterministic** (engine). Dice are retained for:
-- **out-of-combat skill checks** (2d6 + mod + rank, pure WWN) — exploration, social, crafting;
-- **damage variance** (optional small roll, default OFF for competitive clarity, ON for PvE flavor — ⚠️ your call, see 4.6);
-- **opposed checks that aren't spatial**, e.g., the *grapple/throw escape* contest (WWN has a nice opposed-Strength grapple 🔬 — we reuse it for throw-tech difficulty vs. heavier foes).
+Wall interplay: a Launch/Push arc that reaches a splat-able wall becomes **WALL_SPLAT** (stuck,
+juggleable, gravity-suspended for an authored window) if that combo's splat latch is unspent —
+else it clamps to pushback. 🔬 Tekken wall carry: the *reason* to take juggles toward walls.
 
-This keeps WWN's *character* (low, meaningful modifiers; reliable skills; scary combat) while letting the engine own timing. ⚠️ If you'd rather keep a to-hit roll for fidelity to TTRPG feel, that's a real alternative — but I recommend deterministic, and the rest of the spec assumes it.
+## 6.2 The combo grammar ✅ 🔬
 
-## 4.2 Attributes ✅
+The grammar Tekken players will recognize, with each link authored and each extender latched:
 
-Six attributes (WWN uses STR/DEX/CON/INT/WIS/CHA). Modifiers are **low** (WWN-style: roughly −2..+3), and *that low range is a feature* — it keeps frame-data swings small enough that the engine stays the star. Each attribute maps to **specific frame-data levers**, so building a character literally re-shapes your frame data:
+```
+opener (Launch | CH-launcher | Crumple | GuardBreak punish)
+  → juggle hits (decay applies per hit)
+  → [Screw]                       (once) — carry toward the wall
+  → [WALL_SPLAT]                  (once) — wall pickup
+  → [Bound]                       (once) — ground bounce pickup
+  → ender (Knockdown(hard) → okizeme, or Push → spacing reset)
+```
 
-| Attribute | Combat lever (how it edits FrameProfile / resources) | Out-of-combat |
+Every arrow is a **cancel or a link the player chooses and pays for** (AP per action, Focus per
+special cancel). Combos are *planned sentences*, not dexterity tests — and they end (§6.5).
+
+## 6.3 Okizeme & wake-up options ✅
+
+Hard knockdown puts the victim DOWN with a wake timer; the attacker factually moves first. At
+wake-up the defender chooses among rise-in-place / back-rise / delayed rise / any authored
+`state=DOWN` move — including **reversals** (invuln-startup, ruinous on whiff) if the Form
+grants one and the meters allow. This closes v1's one-sided oki (the gap analysis's #1 fix) and
+keeps okizeme a mixup rather than a sentence.
+
+## 6.4 Grounded strings ✅
+
+Tekken-style strings (jab-jab-sweep, delayed mids) are authored **cancel chains** between
+normals (§11): cheap chains with hit/block gates, branch points, and delay windows. The string
+*mixup* (will the third hit be the mid or the low?) is carried by the fog (§7) — the defender
+sees the string's shared cue, not its branch — exactly reproducing "you have to know the string"
+matchup knowledge from real Tekken, as an explicit, learnable system.
+
+## 6.5 THE ANTI-INFINITE CHARTER ✅ (C-FIN — seven governors)
+
+No combo may be infinite. Seven **independent** governors, each alone sufficient to terminate
+loops, all audited (§13.4). A new mechanic must state which governor bounds it before it ships.
+
+1. **Hitstun decay** (Ruleset schedule): each consecutive hit in a combo reduces effective stun;
+   advantage trends negative, so every chain eventually drops.
+2. **Juggle damage decay** (Ruleset × defender weight): juggle damage trends to zero.
+3. **Extender latches**: Screw, Bound, WALL_SPLAT each usable **once per combo** (Ruleset).
+4. **AP exhaustion**: every action costs AP; AP refills only when free of a string (§9.4).
+5. **Focus pricing**: special/super cancels spend the super gauge — extension is bought.
+6. **No positive cycles** (rule R-5): the cancel graph may contain no cycle whose net
+   AP+Focus ≥ 0; verified mechanically over all content.
+7. **The gravity floor** (Ruleset `forced_landing`): once decayed stun in a juggle falls below
+   the minimum pickup startup among the attacker's affordable follow-ups, the victim lands —
+   the audit proves every juggle path in shipped content terminates within K hits.
+
+**Relief valves** (defender agency, not governors): ally interruption and the solo Burst (§8.5).
+
+---
+
+# §7 INFORMATION — THE FOG OF WAR
+
+## 7.1 The Observation API ✅ (C-FOG)
+
+Everything anyone learns about a fight flows through one interface, **consumed identically by
+the player UI and by every AI agent**. If a fact is not in Observation, neither the player nor
+the AI can act on it — the fog is enforced by architecture, not discipline.
+
+Observable, per enemy actor, at any decision point:
+- **Physical state**: position, facing, **current target** (who they're squared up against is
+  visible body language), stance, motion through space.
+- **State class**: free / committed / reeling / blocking / down / grabbed — you can *see* that
+  someone is locked, just not what they're locked into.
+- **The cue** (§7.2) of any in-flight move, with a coarse phase tag (wind-up / swinging /
+  recovering). **Exact remaining ticks are not shown** (until knowledge supplies them).
+- **HP** (default-visible; per-meter `visibility` flags in DefenseProfile make all of this
+  tunable — locked decision: only HP at first). ✅
+- **Public events**: everything that has *resolved* — hits, blocks, parries, movement, KOs —
+  is permanently public, replayable, and exact (C-FOG: facts are never fogged, only intent).
+
+Own side: full information, always (you are one mind commanding it).
+
+## 7.2 Cues — intent as silhouette ✅
+
+Every move authors a **CueClass**: the observable wind-up. Cues are the fog's currency:
+
+- Cues are **coarse-grained by design**: a Form's moves share a small cue vocabulary
+  ("low coiling stance", "high overhand wind-up", "lunging grab shape").
+- **Feints are cue collisions**: a move that shares a cue with a scarier sibling *is* a feint —
+  the throw that starts like the launcher; the bait that starts like the sweep and recovers
+  fast with a CH window. Feint coverage is priced by the budget (§13: cue ambiguity is a paid
+  strength), so lying isn't free.
+- Cue legibility is an art-direction contract: a cue that can't be drawn readably in silhouette
+  gets redesigned (see `vision-mda.md` §5).
+
+## 7.3 Matchup knowledge — the fog as progression ✅
+
+Per-move knowledge tiers, aggregated per Form/enemy style for display (full rules in
+`progression.md`):
+
+| Tier | Earned by ⚠️ | What the UI now does |
 |---|---|---|
-| **STR (Strength)** | +damage on heavies/throws; raises **armor_hits** budget on armored moves; gates heavy weapons; throw-tech contest. | carry, force |
-| **DEX (Dexterity)** | **−startup** on lights/normals (faster pokes); +movement `advance`; gates fast weapons; widens cancel windows slightly. | stealth, acrobatics |
-| **CON (Constitution)** | +max HP; +max **Stamina**; +**Poise** (guard durability). | endurance |
-| **INT (Intelligence)** | +max **Focus**; unlocks/empowers "technique" specials (e.g., charge moves, traps); −Focus cost on cancels. | lore, tech |
-| **WIS (Wisdom)** | **Defensive reads**: widens **parry** window; +Focus refund on parry/CH; better wake-up timing. | perception (the WWN *Notice* skill) |
-| **CHA (Charisma)** | **Tempo / action economy**: governs `AP_max` and `ap_refill` (3.5) — high-CHA builds out-*action* you; plus feint specials, guard-meter chip bonus, "intimidate" debuffs. The dedicated *tempo* attribute. | social |
+| **T0 Unknown** | — | cue shows as a generic silhouette class |
+| **T1 Glimpsed** | seeing the move resolve | move named; codex entry; height/category class shown |
+| **T2 Studied** | repeated exposure / bought intel | full frame data in codex; when its cue appears, the ribbon overlays the **candidate set** (all moves sharing that cue) with their hit windows |
+| **T3 Mastered** | extensive exposure / master training | exact phase-tick readout on their in-flight moves; **throw break keys shown on grab cues**; candidate set ordered by this enemy's observed habits |
 
-> **Balance rule R-2 (one-lever-per-attribute, no double-dipping):** each frame-data lever is driven by **exactly one** attribute, and offensive levers (STR damage, DEX speed) are balanced against defensive levers (CON/WIS survivability) so a pure-offense build is *faster but frailer*, never strictly better. The audit verifies no attribute touches both a major offensive and a major defensive lever (that would create a dominant stat).
+Knowledge never removes the read — a T3 candidate set with two entries is still a guess — it
+*sharpens* it, which is exactly what matchup knowledge does for a real fighting-game player.
 
-⚠️ **Follow-up — derived modifier curve.** I'm using WWN's *low* modifier philosophy. Exact mapping (e.g., "DEX +1 = −1 startup tick on lights, capped at −3") needs a tuning table I can draft once you confirm the modifier range and the tick budgets in 4.5. This is genuinely a playtest-tuned number, not something to assert blind.
+## 7.4 The forecast — the honest prediction ✅
 
-## 4.3 Skills and Foci ✅
+When composing a commitment, the player sees a deterministic preview rendered from the engine's
+own math (never a reimplementation): the move's reach envelope painted on the arena, its phase
+ribbon on the timeline, and — for every actor currently inside the envelope — the projected
+result *if the world stays as last observed* (damage, reaction, resulting advantage). The
+forecast is exact about your move and silent about their hidden intent; the gap between those
+two is the game. ✅ user-confirmed: "this allows for feints and other tricks."
 
-🔬 WWN skills are **rank 0–4**, bought with skill points, added to 2d6 checks. We keep that, plus WWN's **Foci** (feat-like talents) as the **moveset gate**:
+## 7.5 The AI contract ✅
 
-- **Combat skills** (Stab/Punch/Shoot analogues → here: per weapon-class proficiency, rank 0–4). Rank does **not** add a to-hit (no die); instead **rank unlocks moves and improves their frame data** (higher rank → access to that weapon's heavy/special moves, and better `on_block` safety). This is how "skills gate moves" is realized concretely.
-- **Foci** = the build-defining unlocks. A Focus is what grants an *archetype's signature mechanic* (e.g., *Iron Guard*: gain armor property on a blocked-to-counter move; *Whirlwind*: a multi-hit special; *Read the Wind*: WIS-scaled parry). Foci are the **modular content slots** — new archetypes = new Foci + new Moves, zero engine changes.
+AI agents receive the same Observation a player would and **never** read hidden commitments.
+Their differing strength comes from authored **read profiles** (aggression, gambler, turtle,
+step-happy), per-enemy cue-response tables, and bosses' authored "smart reads" (better priors,
+not x-ray vision). This keeps every AI fight honest and every AI beatable by the same skills
+the game teaches. (Authoring details live with L5/encounters — out of combat-spec scope.)
 
-> **Balance rule R-3 (gates are floors, not multipliers):** a requirement either lets you use a move at its designed numbers, or you can't use it. Meeting a requirement *more* (e.g., STR far above a heavy weapon's req) gives a **small, capped** bonus, never runaway scaling. This stops "dump everything into one stat" from snowballing.
+---
 
-## 4.4 Equipment ✅
+# §8 PARTY COMBAT
 
-Equipment is a **second compiler into FrameProfile**, stacking after stats. Modular: an item is just a bundle of frame-data deltas + a MoveList contribution + requirements.
+## 8.1 Sides, control, scale ✅
+
+N actors per side on one timeline; the player commits for **every** allied actor at its decision
+points (interleaved naturally by `ready_tick`). Designed and balanced for **3 per side**; N is a
+content/config knob, not an engine assumption. Sides and elimination drive outcome: a side is
+out when all its actors are KO; last side standing wins.
+
+## 8.2 Bodies on the plane ✅
+
+Actors do not body-block (pass-through); only hitboxes interact. Wide hits and beams clip
+bystanders per `does_hit` — lining two enemies onto one lane is a legitimate, rewarded play
+(and the anime fantasy). **Friendly fire defaults OFF** per hit; specific reckless moves and all
+arena hazards may author it ON. ✅
+
+## 8.3 Sandwiches, back attacks, geometry defense ✅
+
+Because guarding is facing-relative (§5.3), being targeted by two enemies on opposing lanes
+means someone is at your back: back hits bypass guard and parry. Counterplay is **geometric**:
+re-target (free with any action; or the quick `switch_focus`), sidestep to put both enemies on
+one side (the kung-fu-movie rotation), spend movement to break the sandwich, or trust an ally to
+peel one off. ⚠️ Watch-item: outnumbered situations must feel *dangerous but navigable* — boss
+solos get authored armor/homing kits instead of engine pity rules (C-AUTH).
+
+## 8.4 Ally interruption — mostly emergent ✅
+
+A comboing attacker is **locked in their own moves and counter-hittable** like anyone else, so
+the primary combo-rescue is simply: *another ally hits them.* That this falls out of the
+existing rules with no special case — the rescuer's launcher counter-hits the comboer mid-string
+— is the party system's best feature. On top of the emergent path, Forms may author **RESCUE
+moves**: gap-closers gated `reqs.condition: ALLY_IN_HITSTUN`, typically armored and
+Focus-costed, for when positioning failed. They obey every governor; nothing about rescue is a
+new engine path.
+
+## 8.5 The solo Burst ✅
+
+When no conscious ally can reach you, a **BURST move** (gated: usable from HITSTUN/JUGGLE via
+the per-hit reaction window, §4.1) spends a large Focus cost + the once-per-fight burst latch:
+brief full invuln, a small radial push, both actors reset to free. The canonical
+anti-oppression valve 🔬 (GG Psych Burst), deliberately expensive and once.
+
+## 8.6 KO, revival, loss ✅
+
+Companions at 0 HP are KO'd (removed from the timeline, body remains as fiction); allies can
+revive them mid-fight via authored UTILITY moves (slow, interruptible, the classic JRPG gamble)
+or after victory. **Loss = full party wipe**, and is a soft loss at the campaign layer
+(see `exploration.md`). The protagonist falling is not special-cased. ✅
+
+---
+
+# §9 METERS & ESCALATION
+
+Five pools + two latches. Every pool answers a *different* strategic question, so a string can
+end (or a fight turn) for distinctly legible reasons. All maxima/regeneration compiled by L4;
+all costs authored per move (C-AUTH).
+
+| Meter | Builds / regenerates | Spent on | The question it asks |
+|---|---|---|---|
+| **HP** | out-of-combat / items / revival | — | are you still in the fight |
+| **Breath** | per-tick while not executing | most actions (small), big motions (more) | can your body keep going — the anti-mash pacing floor, deliberately light ⚠️ |
+| **Guard** | slow regen while not blocking | drained by blocked chip | can you keep turtling (no → GUARDBROKEN) |
+| **AP** | refills to max when you exit a string / regain freedom | every action's `ap_cost`; `ap_gain` on success gates | how long your *turn* runs — the tempo budget |
+| **Focus** | **earned**: landing hits, having hits blocked, *taking* damage (small 🔬 comeback factor), parries / CH / whiff-punishes (large — skill pays) | special cancels, EX moves, supers, Burst, many RESCUE moves | what power you've earned — the escalation gauge |
+
+**Escalation is structural**: Focus only accumulates during a fight, Heat and Rage are one-way
+latches — so every fight ramps from grounded pokes toward beams and cut-ins by construction,
+not by script. (The DBZ arc, guaranteed by bookkeeping.)
+
+## 9.4 AP notes ✅
+
+Per-actor. In open play you commit one action and AP barely binds; against a locked opponent you
+chain cancels, paying per link — **a long combo is literally an AP expenditure**. `ap_gain` is
+conditional on success (ON_HIT/ON_CH/ON_PARRY...), never unconditional; rule R-5 forbids any
+self-reaching cycle with non-negative net gain. (Inherited from v1 §3.5 unchanged in substance.)
+
+## 9.5 Heat ✅ 🔬 (Tekken 8)
+
+One per fight. Enter via a **Heat Burst** action or by landing a `HEAT_ENGAGER` hit. For an
+authored duration: the actor's moves use their compiled **Heat variants** (the L4 compiler
+emits both profiles up front — Heat is "swap the resolved frame data," conceptually free for the
+engine), chip-on-block, unique Heat-only cancels/dashes. Ends on timer or KO. *When to
+transform* is a real mid-fight decision, and visually it is the aura moment.
+
+## 9.6 Rage ✅ 🔬
+
+At an authored HP threshold the actor latches **Rage**: a passive authored damage scalar and
+access to the **Rage Art** — a once-only, armor-startup cinematic super that consumes the state.
+The legitimate comeback read: everyone knows it's loaded (HP is visible), nobody knows when.
+
+---
+
+# §10 SUPERS, EX, PROJECTILES
+
+## 10.1 EX moves ✅
+
+Focus-priced enhanced variants of Form moves (more damage, better reactions, armor, extra hits)
+— authored as their own Move entries sharing the base cue (an EX *looks* like its base until it
+lands: an honest, priced ambiguity).
+
+## 10.2 Supers ✅
+
+Large Focus spends; cinematic presentation (cut-ins, camera takeover); typically armored or
+invulnerable startup, enormous reward, ruinous whiff recovery; gated by Form rank (L4). Supers
+respect every governor (they end strings emphatically rather than extending them — most are
+combo *enders* by authored reaction).
+
+## 10.3 Projectiles & beams ✅
+
+- **Missiles** (`PROJECTILE_SPAWN`): independent timeline entities — position, velocity along
+  facing at spawn, lifetime, one HitEvent. Two overlapping missiles annihilate by priority tier.
+  Sidestep beats LINEAR missiles; blocking chips Guard; i-frame-through is Form tech.
+- **Beams**: not entities — a move with a very long, narrow envelope and a multi-tick active
+  window (Kamehameha as frame data). Inherently LINEAR (sidestep is the answer 🔬 DBZ dodges);
+  homing beams are budget-priced exceptions.
+
+---
+
+# §11 CANCELS & CONFIRMS
+
+Inherited from v1 nearly verbatim — the rules that make combos planned rather than reactive:
+
+- `CancelWindow { from, to, gate: ON_HIT|ON_BLOCK|ON_CONTACT|ALWAYS|ON_WHIFF, into, cost }`.
+- **Lock-then-confirm**: your initial commitment is blind (side-blind, §4.2), but ON_HIT /
+  ON_BLOCK cancels are decided by the **actual contact result** — you genuinely hit-confirm,
+  reacting to facts, never to the opponent's hidden input. ✅
+- **No startup cancels by default** (`startup_cancelable: false`): you cannot un-commit because
+  the reveal scared you. Explicit exceptions are authored, costed feint tech. ✅
+- Whiff cancels exist behind `ON_WHIFF` gates: rare, expensive, budget-priced.
+
+---
+
+# §12 LAYER 4 — THE BUILD → FIGHTER COMPILER
+
+The contract, restated for v2 (mechanics of acquisition live in `progression.md`):
 
 ```
-Weapon {
-  class            # dagger / sword / greatsword / spear / fists / bow ...
-  grants_moves     # the MoveList this weapon contributes
-  frame_deltas     # global +startup/−recovery/±range/±damage applied to its moves
-  reach_profile    # this is where weapon RANGE lives — spacing identity!
-  requirements     # STR/DEX gates
-  resource_mods    # e.g., greatsword: +damage, +stamina cost, −speed
-}
-Armor {
-  poise_bonus, hp_bonus
-  speed_penalty    # heavier armor → +startup / −movement (the tradeoff)
-  damage_resist
-}
-Accessory/Talisman {
-  resource_mods, special_property_grants   # e.g., +1 armor_hit, +Focus regen
+Build  = { attributes, Form ranks, foci, equipment + affixes, loadout selection }
+compile(Build) -> Fighter {
+    MoveList      # resolved Moves: base (authored in the Form) × attribute levers
+                  #   × equipment deltas × affix riders; Heat variants emitted alongside
+    DefenseProfile
+    meter maxima, visibility flags
 }
 ```
 
-**Weapon = your spacing identity.** A spear has long `max_range`/`min_range` (great poke, weak up close); a dagger is short-range, fast startup, low damage; a greatsword is slow, huge, plus-on-block-if-spaced. This is the single most important RPG-into-engine coupling: **choosing a weapon chooses your frame data and your preferred range**, exactly bridging "RPG build" and "fighting-game character."
+- The engine never sees a stat; the compiler never reaches past the data contract. One bridge,
+  one direction (audit C-5).
+- **Weapon = spacing identity** (range/speed/damage triangle, rule R-4); **Form = moveset
+  identity** (cue vocabulary, signature mechanics); **attributes = levers** (exactly one major
+  lever each, rule R-2); **affixes = riders** on any of the above, budget-audited (§13).
+- Requirements are floors with small capped over-meet bonuses, never multipliers (rule R-3).
+- Hitstun/blockstun on the defender's side are never compiler-touched, keeping I-1 advantage
+  honest.
 
-> **Balance rule R-4 (the universal tradeoff triangle):** for any equipment, **range ↔ speed ↔ damage** — improving one worsens at least one other, weighted by requirements/weight. No weapon may be top-tier in all three. The audit scores every weapon on this triangle and flags any that Pareto-dominate another.
+---
 
-## 4.5 The frame-data budget — how balance is *enforced*, not hoped for ✅ 🔬
+# §13 BALANCE AS A CHECKABLE PROPERTY
 
-This is the mechanism that makes "please make it balanced" a property of the system rather than a wish. Every move must satisfy a **points identity**: its strengths must be paid for by weaknesses.
+## 13.1 The budget identity v2 ✅
+
+Every move must pay for its strengths; v2 extends v1's `MOVE_VALUE` with the new axes:
 
 ```
 MOVE_VALUE(move) =
-      w_speed   * (BASELINE_STARTUP - startup)      # faster = costs points
-    + w_safety  * on_block                           # plus-on-block = costs points
-    + w_reward  * expected_damage                     # more damage = costs points
-    + w_range   * reach_advantage                     # more range = costs points
-    + w_props   * Σ property_values                   # i-frames/armor = costs points
-    - w_cost    * resource_cost                        # paying resources REFUNDS points
-    - w_commit  * total_frames_if_whiffed              # being punishable REFUNDS points
-
-CONSTRAINT:  MOVE_VALUE(move)  ≈  ARCHETYPE_BUDGET   (within ±ε for every move)
+    w_speed   · (BASELINE_STARTUP − startup)
+  + w_safety  · on_block
+  + w_reward  · expected_damage_and_reaction_value      # Launch > Crumple > Hitstun, etc.
+  + w_range   · reach_advantage
+  + w_arc     · region_width_and_multi_target_value     # party-relevant: wide sweeps & beams pay
+  + w_track   · tracking_coverage                        # HOMING pays, LINEAR refunds
+  + w_props   · Σ property_values                        # armor/invuln/heat-engager priced
+  + w_meter   · Σ gain_values                            # AP/Focus generation priced
+  + w_lie     · cue_ambiguity_value                      # sharing a cue with a high-threat sibling pays
+  − w_cost    · resource_costs
+  − w_commit  · whiff_exposure
+  ≈ FORM_TIER_BUDGET ± ε        for every move in shipped content
 ```
 
-In words: **a move that is fast, safe, long-range, damaging, and propertied must be either resource-expensive or horribly punishable on whiff — or it violates the budget and gets flagged.** This is the formal version of fighting-game design wisdom ("everything good must have a real downside"). It also gives you a *tool*: to add a new move, solve for the weakness that balances its strengths.
+⚠️ The weights are the master tuning knobs (playtest-owned); the *identity* is the law.
 
-> The weights `w_*` are the master tuning knobs. Set them once per game-feel target; then balance becomes "does every move hit budget?" — checkable by script. ⚠️ Initial weights need playtesting; I can propose a starting set and a spreadsheet model on request (this is exactly the iterative frame-balancing real fighters like Tekken do continuously — it's expected, not a gap).
+## 13.2 The balance rules ✅
 
-## 4.6 Damage, HP, and the WWN "scary combat" feel ✅
+R-1 no zero-cost dominant action · R-2 one major lever per attribute · R-3 gates are floors ·
+R-4 the weapon range↔speed↔damage triangle (no Pareto-dominant weapon) · R-5 no net-positive
+AP/Focus cycle in the cancel graph · **R-6 (new)** every juggle path terminates within K hits
+under the Ruleset (governor-7 proof over content) · **R-7 (new)** cue honesty: every move has a
+cue; every cue class in a Form has ≥ 2 members *or* its singleton move pays `w_lie = 0`
+(no free information hiding, no unreadable one-off tells).
 
-- **HP** is low-ish and slow to restore (Soulslike). Damage numbers come from `hit_effect.damage × STR-scaling × combo-decay`.
-- 🔬 WWN's **Shock damage** (unarmored = scary) ports as: low-Poise/low-armor targets take **bonus chip and bonus CH** — being under-armored is genuinely dangerous, matching both WWN and Dark Souls.
-- ⚠️ **Damage variance default OFF** for PvP clarity (deterministic combos), **ON (small 2d6-flavored roll)** as a PvE option. Your call; flagged in 4.1.
+## 13.3 The defensive RPS, v2 edition ✅
+
+Every defensive option loses to something; the audit checks no option dominates:
+block ↔ throws & guard-decay · crouch ↔ mids · parry ↔ throws/feints · sidestep ↔ homing &
+realigning grabs · backdash ↔ advancing reach · re-target/rotation ↔ committed homing pressure ·
+Burst ↔ its price & once-ness · ally rescue ↔ positioning & its own counter-hit risk.
+
+## 13.4 The audit ✅
+
+A content-level test binary (run in CI, like v1's `npm run audit`): I-1 consistency · budget
+residuals · R-1…R-7 · cancel-graph cycle scan · juggle-termination proof · RPS coverage matrix ·
+cue-collision report (every feint pair listed, priced, and intentional).
 
 ---
 
-# WORKED EXAMPLE — proving the engine actually plays
+# §14 WORKED EXAMPLE — a 2v2 under fog
 
-Two characters. **Reza** (DEX dagger, fast/frail) vs. **Borin** (STR greatsword, slow/armored). One full exchange, tick by tick, to show neutral → pressure → punish all emerge from §2.
+Player side: **Reza** (dagger, *Drifting Leaf* — step/CH Form) and **Borin** (greatsword,
+*Iron Mountain* — armor/guard Form). Enemy side: a **Corsair Duelist** (rapier strings) and a
+**Fog-Touched Brute** (command grabs). Knowledge: Reza's player has the Duelist at **T2**
+(studied), the Brute at **T0** (never met). Arena: a dock — wall on the west, water hazard east.
 
-**Setup:** Both NEUTRAL, `ready_tick = 0`, `T = 0`, spaced just inside greatsword range.
-- Reza commits **Light Slash** (startup 4, active 2, recovery 6; `on_block −1`, `on_hit +3`; short range).
-- Borin commits **Heavy Cleave** (startup 14, active 3, recovery 18; `on_block −6`, `on_hit +5`, armor[4..14]; long range). Both hidden → reveal.
-
-| T | Reza | Borin | Engine |
-|---|---|---|---|
-| 0 | commit Light (st4) | commit Heavy (st14) | NEUTRAL: both hidden, revealed |
-| 4 | **active** | startup | `does_hit(Reza→Borin)`? In range → **HIT**… but Borin's **armor** window is [4..14] → **ARMORED**: Borin takes dmg, *no hitstun*, Heavy continues |
-| 6 | recovery (6t) | startup | Reza now locked in recovery until T=12 |
-| 12 | actionable (ready=12) | startup (active at 14) | **PRESSURE regime flips to Reza**: he's free, sees Borin locked till active@14. He reads the incoming Heavy. |
-| 12 | commits **Backdash** (st3, iframes 13–16) | — | Reza chooses to escape rather than trade |
-| 14 | backdash active (moved out of range) | **active** (Cleave) | `does_hit(Borin→Reza)`? Reza out of `max_range` → **WHIFF**. `on_whiff=0` → Borin eats full 18 recovery |
-| 17 | actionable @ ~17 | recovery till 35 | **PRESSURE flips to Reza**: Borin locked 18t. Reza **whiff-punishes**. |
-| 17 | commit **Light → cancel → Special** (confirm) | DOWN soon | Light hits a recovering Borin = **counter-hit** (×1.25, +6 stun); hit-confirm cancel into Special (pays Focus); combo, juggle decay caps it; knockdown |
-| ~40 | okizeme pressure | wake-up; may reversal (Focus) | Knockdown → Reza sets mixup; Borin's get-off-me option keeps it fair |
-
-**What this demonstrates (maps to the audit):**
-- Neutral mind-read, armor trading, **spacing-based whiff**, regime flips, **whiff-punish + counter-hit payoff**, hit-confirm cancel, juggle decay, okizeme + reversal — *all emerge from the single `ready_tick` rule and the contact resolver.* No bespoke logic per situation. That's the consistency proof.
-- The DEX/frail vs STR/armored identities came entirely from L4 compiling different frame data — the engine treated both identically.
-
-### Addendum — sidestep evasion + the AP action economy
-
-A second short exchange to show the two new systems. Borin (now playing a high-CHA *tempo* variant, `AP_max = 5`) has initiative on a blocking Reza (PRESSURE regime).
-
-| T | Action | AP | Lateral / tracking | Engine |
-|---|---|---|---|---|
-| — | Borin starts string, AP = 5 | 5 | — | has initiative on locked Reza |
-| 0 | **Tempo jab** (LINEAR, ap_cost 1, +1 ON_HIT) | 5→4, hits → +1 → **5** | on-axis, connects | net-neutral confirm — turn stays alive |
-| 6 | cancel → **Light** (LINEAR, cost 1) | 5→4 | Reza **sidesteps** (offset > band) | `does_hit`? lateral fails → **WHIFF**. Reza dodged the linear follow-up |
-| — | Reza now off-axis, Borin mid-whiff | — | — | Reza can whiff-punish the linear miss — sidestep = whiff-punish setup |
-| (alt) 6 | cancel → **Homing sweep** (HOMING, cost 2, +0) | 4→2 | `step_in` realigns to Reza's offset | **HITS** despite the step — homing is the counter to step-happy defense, but cost 2 + slower bleeds the budget (4.5) |
-| 12 | **Heavy finisher** (cost 3, gain 0) | 2 < 3 → **cannot afford** | — | **AP exhaustion (governor 4)** ends the string. Initiative re-evaluates by `ready_tick`. |
-
-This shows: (1) **sidestep dodges linear, loses to homing**, routed entirely through `does_hit`'s lateral clause — no new engine path; (2) **AP-positive links** (the +1 ON_HIT jab) keep a turn alive while **AP-negative finishers** end it; (3) the string terminated on the **AP axis** even though Focus/hitstun hadn't run out — the four governors are genuinely independent.
-
----
-
-# APPENDIX A — MODULE / FILE MAP (for implementation, honoring your modularity preference)
-
-```
-/core
-  tick.ts            # T, scheduler, advance_until_next_decision()   [L0/L2]
-  frameprofile.ts    # FrameProfile, Property, invariant I-1 checks  [L0]
-  entity.ts          # Entity, state machine                         [L0]
-  resolver.ts        # resolve_contact, interaction priority (2.4)   [L2]
-  regime.ts          # NEUTRAL/PRESSURE decision (2.1)               [L2]
-/spatial
-  lane.ts            # pos (lane) + offset (sidestep) + height; does_hit w/ tracking (1.1–1.2)  [L1]
-/moves
-  move.ts            # Move, MoveList, CancelWindow                  [L3]
-  resources.ts       # Stamina/Poise/Focus/AP/HP                     [L3]
-  economy.ts         # AP costs/gains, R-5 no-positive-cycle check (3.5)  [L3]
-/rpg
-  sheet.ts           # attributes, skills, foci                      [L4]
-  compiler.ts        # stats+equipment → resolved FrameProfile       [L4]  ← the only L4→L2 bridge
-  equipment.ts       # weapons/armor/accessories                     [L4]
-/balance
-  budget.ts          # MOVE_VALUE identity + linter (4.5)            [tooling]
-  audit.ts           # runs §B checks as automated tests
-```
-
-The **single bridge** is `rpg/compiler.ts → FrameProfile`. Nothing else in `/rpg` may import from `/core`. If that rule holds, you can rebuild the RPG or the engine independently — the modularity you wanted, enforced by import boundaries.
-
----
-
-# APPENDIX B — CONSISTENCY & FUN AUDIT
-*(You asked me to go back over the whole spec for consistency AND fun. This is that pass, done honestly — including the places it's not yet airtight.)*
-
-## B.1 Consistency checks
-
-| # | Claim | Verdict |
+| T | What happens | Why it demonstrates the spec |
 |---|---|---|
-| C-1 | Frame advantage is never set independently of stun+recovery | ✅ Enforced by invariant **I-1** (0.2); authoring tool computes it. |
-| C-2 | Neutral vs pressure never need special-case code | ✅ Both derive from `ready_tick` comparison (2.1). Worked example confirms. |
-| C-3 | Hit/miss decided once, not twice | ✅ Engine is deterministic; dice removed from combat hit-resolution (4.1). No double-resolution. |
-| C-4 | No infinite combos | ✅ **Four independent governors** (Focus cost, juggle decay, hitstun decay — 3.4/2.8 — plus **AP exhaustion**, 3.5). Quadruple redundancy is deliberate. |
-| C-5 | Every layer's interface is one-directional | ✅ Only `compiler.ts` bridges L4→engine; import-boundary rule (App. A). |
-| C-6 | The "react to reveal" exploit is closed | ✅ Lock-then-confirm + no startup cancels by default (2.10). |
-| C-7 | Spatial model swap doesn't ripple | ✅ Lane + sidestep both go through the single `does_hit` predicate (1.2); the lateral axis is `spatial/lane.ts` only — L2 untouched. |
-| C-8 | "2D / continuous grid" honored per your clarification | ✅ **Resolved** — continuous 1D spacing lane + Tekken lateral/depth `offset` for sidestep evasion (1.1). Spacing stays scalar (one-to-one frame translation intact); `offset` only gates linear-vs-tracking. |
-| C-9 | WWN identity preserved | ✅ for skills/foci/saves/low-mods/shock; ⚠️ **diverges** by removing the d20 to-hit (4.1) — a deliberate, justified break you should sign off on. |
-| C-10 | No infinite AP / net-positive tempo loop | ✅ **Balance rule R-5** (3.5.3): no move may sit in its own transitive cancel set with `ap_gain ≥ ap_cost`; audit scans the cancel graph for positive-weight cycles. |
-| C-11 | Sidestep evasion has real counterplay (not a dominant defense) | ✅ Sidestep beats LINEAR, loses to TRACKING/HOMING and does nothing vs. throws (2.6); homing moves cost more on the budget (4.5). Folds into the defensive RPS. |
+| 0 | Both sides have all actors free at T=0 → **side-blind commit** (§4.2). Player: Reza steps in targeting the Duelist; Borin guards facing the Brute. Enemy (hidden): Duelist begins a string at Reza; Brute advances on Borin. | N-actor scheduling; commitments hidden across sides, shared within a side. |
+| 4 | Reza's decision point. Observation: Duelist shows the **"low coil" cue, wind-up phase**. At **T2 knowledge** the ribbon overlays the candidate set: `{sweep (LOW, launches on CH), thrust feint (MID, fast recover)}`. A guess — sharpened, not solved (§7.3). | Cues, candidate sets, the read surviving knowledge. |
+| 4 | Reza commits **sidestep-N** (perpendicular to the *Duelist's* lane). Forecast shows her vacating the narrow LINEAR band of both candidates (§7.4). | Target-lane geometry; the honest forecast. |
+| 9 | The sweep was real — it **whiffs through Reza's vacated band** (`does_hit` arc clause fails). Duelist eats `on_whiff = 0` → full recovery, visibly *recovering* (state class is public). | Sidestep = whiff-punish setup, same path as footsies (§3.3). |
+| 10 | Reza, free first, **whiff-punishes**: CH launcher (the Duelist's recovery = CH state) → `ch_reaction: Launch`. Juggle begins: chain (AP 1), special cancel (Focus 3, AP 2) → **Screw** (latch spent) carrying west toward the wall. | CH rules (§5.6); grammar + governors paying as she goes (§6). |
+| ~22 | Carry reaches the wall → **WALL_SPLAT** (latch spent), pickup, two decayed hits — hitstun decay now beats her cheapest pickup's startup → **gravity floor forces the landing** (governor 7). She authors the ender: hard knockdown → oki. Combo over: 6 hits, 3 latches spent, AP nearly dry. | Wall carry; three governors visibly terminating the combo (§6.5). |
+| 12→24 | Meanwhile the Brute's unknown cue (T0: generic "lunging grab shape") connects on guarding Borin — **throws beat block** — opening the **break reaction window**: L or R, no knowledge hint at T0. Borin guesses L; the key was R → **THROWN**, hard knockdown by the water's edge. | Throw fog; the directional read; reaction windows (§5.4, §4.1). |
+| 30 | Brute begins oki pressure on downed Borin — but the Brute is mid-cue on a slow stomp and **Reza retargets** (free with her next commit) and dashes the open lane. Her strike **counter-hits the Brute mid-move: the combo on Borin never starts.** No rescue mechanic fired — just the rules (§8.4). | Emergent ally interruption; retargeting; sandwich geometry reversed. |
+| 38 | Borin takes the wake-up decision: delayed rise (reads a meaty), then **Heat Burst** on rising — greatsword Heat variants come online, chip-on-block (§9.5). The fight has visibly escalated: Reza's Focus from the punish-combo + Borin's from taking hits ≈ a super is now affordable. | Wake-up options (§6.3); escalation by construction (§9). |
+| 44+ | Borin cancels a blocked Heat cleave into the **beam super** (Focus dump): a long narrow envelope down the lane — it clips **both** enemies, who'd been allowed to line up. Cut-in, KO the Duelist; the Brute blocks at the cost of guard-crush. | Supers & beams (§10); multi-target regions priced but devastating (§8.2). |
 
-## B.2 Fun / depth checks (does it produce the *feeling* of a fighting game?)
-
-| Pillar of fighting-game fun | Reproduced? | Where |
-|---|---|---|
-| **Neutral mind-game** (read/whiff-punish) | ✅ | NEUTRAL regime + spatial whiff (2.1, 1.2) |
-| **Spacing matters** | ✅ | weapon reach = identity (4.4), movement has cost (1.3) |
-| **Commitment & risk** | ✅ | every action has whiff recovery; budget rule (4.5) forbids no-downside moves |
-| **Combos & execution → here, *planning*** | ✅ | cancels/confirms (3.4, 2.10); execution skill becomes *reading + sequencing*, which is the whole point of removing the timing constraint |
-| **Defensive RPS** (block/parry/throw/step) | ✅ | 6-way interaction (2.6): block↔throw, parry↔throw, backdash↔advance, sidestep↔homing |
-| **Lateral evasion / Tekken reads** | ✅ | sidestep dodges linear, homing punishes the step (1.1, 2.6); SSL vs SSR are distinct reads (`track_side`) |
-| **Tempo / action economy** | ✅ | AP strings (3.5); spend-a-finisher-vs-extend-the-turn is a real decision; AP-positive links reward confirms |
-| **Comeback / get-off-me** | ✅ | wake-up reversals (2.8), Focus-earned offense |
-| **Build identity (RPG)** | ✅ | attributes edit frame data (4.2); weapon = spacing (4.4); CHA = tempo build (3.5.4) |
-| **Soulslike weight** | ✅ | stamina-gated offense, poise/guard-break, scary-when-unarmored (3.1, 4.6) |
-
-## B.3 Honest risks the audit surfaced (where it could become *un*-fun, and the mitigation)
-
-1. **Analysis paralysis.** No time limit + full frame data visible could make matches glacial (the rpgcodex critique of simultaneous-turn games: "headless chickens looking for an opening"). **Mitigations baked in:** stamina/Focus regen only in neutral (rewards committing), guard-break (punishes infinite turtling), and the pressure regime giving the plus player a clear initiative. ⚠️ Still the #1 thing to playtest. A soft "intent timer" or an optional clock is a fallback lever if needed.
-2. **Information asymmetry feel-bad.** In PRESSURE the actor sees *everything* the locked player will do. That's realistic (they're committed) but can feel oppressive on the receiving end. **Mitigation:** reversals + the fact that getting plus had to be *earned*. Tune knockdown advantage conservatively.
-3. **The budget weights are unproven.** §4.5 makes balance *checkable* but the weights `w_*` and the DEX→startup curve (4.2) are real playtest numbers, not derivable a priori. I've been explicit rather than faking precision. This is normal for the genre (even Tekken re-tunes frame data every patch) — but it's the largest open work item.
-4. **AP pacing interaction.** The action economy (3.5) is a *second* throttle on offense alongside the tick clock. If `AP_max`/`ap_refill` are set too low, pressure turns fizzle and combos feel anemic; too high and strings overstay. This is a new tuning surface introduced by the action economy — earmarked for playtest alongside the budget weights.
-5. **Remaining crisp forks on you:** throw/armor (0.3), damage variance (4.6), the AP-model interpretation (see open items), startup-cancel rule (2.10), parry-as-Focus (2.6). The 1D-vs-2D fork is now **resolved** (Tekken lane+sidestep, 1.1).
-
-## B.4 Verdict
-
-Internally **consistent**: yes — the `ready_tick` regime rule + invariant I-1 + the single L4→engine bridge make the system coherent, and the worked example (incl. the sidestep/AP addendum) runs cleanly with no special cases. The four combo-governors, the no-positive-AP-cycle rule (R-5), and the budget identity make "balanced" a *checkable property*, not a hope. The Tekken sidestep and the AP economy both slot in without touching L2 — the lateral axis lives entirely in `does_hit`, and AP is an orthogonal tempo resource that doesn't duplicate ticks, Focus, or Stamina.
-
-**Fun**: the structure reproduces every pillar of fighting-game depth (neutral, spacing, RPS, commitment, payoff), adds the Tekken lateral-evasion read and a genuine tempo/action-economy decision layer, and grafts a Soulslike-RPG build layer on top via the stats-compile-to-frame-data design. The main threat to fun is pacing (analysis paralysis), now with a second pacing knob (AP) that helps *and* must itself be tuned — the key playtest target.
+Every beat above runs on the general rules — no special cases were invoked anywhere in this
+table. That is the consistency proof carried over from v1, now under fog, in a party, on a plane.
 
 ---
 
-# OPEN ITEMS FOR YOU (the explicit ⚠️ follow-ups, collected)
+# §15 OPEN TUNING TABLES ⚠️ (playtest-owned, deliberately not asserted)
 
-1. **Spatial model — RESOLVED** to Tekken lane + sidestep (1.1). No longer a fork; flagging only in case you want sidewalk to be *continuous-hold* (Tekken sidewalk) vs. a fixed-distance hop — I defaulted to both existing (1.3).
-2. **AP model interpretation** — I read "action points" as a **tempo / turn-budget** resource (how many actions you chain before yielding initiative), distinct from ticks/Focus/Stamina (3.5). The main alternative reading is a **fixed per-turn AP budget like a tactics game** (e.g., "3 AP every turn, moves cost AP, no chaining concept"). I chose tempo because it integrates with the pressure regime and rewards your "moves generate AP" idea directly — but if you meant the tactics-budget version, say so and I'll re-cut 3.5. **(New fork from this round.)**
-3. **AP stat home** — I assigned `AP_max`/refill to **CHA** to give it a combat identity without double-dipping (3.5.4). Confirm, or pick a different attribute / a new derived "Tempo" stat.
-4. **Deterministic combat (recommended) vs. keep a to-hit roll** for TTRPG fidelity? (4.1, C-9)
-5. **Damage variance** OFF (PvP) / ON (PvE)? (4.6)
-6. **Armor vs. throws** — confirm throws beat armor. (0.3)
-7. **"No startup cancels by default"** — confirm the anti-degeneracy rule. (2.10)
-8. **Parry as resource generator?** — confirm Focus refund + the new AP refund on parry (2.6, 3.5.2).
-9. **Tuning tables** — modifier→tick curves, budget weights `w_*`, and now the **AP economy numbers** (`AP_max`, `ap_refill`, per-move `ap_cost`/`ap_gain`). Want me to draft a starting spreadsheet model covering all three? This is the iterative-balance work, best done against your target game-feel.
+1. Ruleset curves: hitstun decay schedule, juggle decay, guard-break stun, block re-evaluate
+   interval, wake timers.
+2. Budget weights `w_*` and Form tier budgets.
+3. Meter economy: Breath costs/regen, AP_max/refill & per-tag ap_costs, Focus gain table
+   (the skill-pays multipliers), Burst price, Heat duration, Rage threshold & scalar.
+4. Knowledge thresholds (T1/T2/T3 exposure counts) and intel pricing.
+5. Cue vocabulary size per Form (readability vs. richness).
+6. Attribute lever curves (per `progression.md` §3).

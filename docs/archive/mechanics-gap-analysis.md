@@ -1,4 +1,10 @@
-# Fighting-Game Mechanics Catalog & Gap Analysis
+# Fighting-Game Mechanics Catalog & Gap Analysis (v1 prototype — ARCHIVED)
+
+> **⚠️ ARCHIVED 2026-06-09.** The coverage marks (✅/🟡/⬜…) refer to the **deleted v1
+> prototype**, not the current design. The v2 spec ([`../frame_rpg_spec.md`](../frame_rpg_spec.md))
+> adopted most of this catalog's Tier 1–2 recommendations: wake-up options, a burst, walls/
+> wall-splat, supers + install (Heat) + comeback (Rage), juggle extenders, multi-hit moves,
+> projectiles. The genre catalog itself (Parts A–B) remains a useful checklist.
 
 *A cross-genre catalog of fighting-game mechanics, each marked with TICK's coverage — and a
 prioritized read on what's worth adding.*

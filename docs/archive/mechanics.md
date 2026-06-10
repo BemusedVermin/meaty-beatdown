@@ -1,4 +1,12 @@
-# TICK — Mechanics Reference
+# TICK — Mechanics Reference (v1 prototype — ARCHIVED)
+
+> **⚠️ ARCHIVED 2026-06-09.** This document describes the **deleted v1 TypeScript/Rust
+> prototype** (git history, `0e2eaae` and earlier). It is kept as a reference for what was
+> proven to work, but it is **not** the current design — that is
+> [`../frame_rpg_spec.md`](../frame_rpg_spec.md) (v2) and its companion docs. Known v2
+> divergences: fog of war everywhere (not just neutral), party battles on target-lanes,
+> Tekken heights (no OVERHEAD), Focus = the super gauge, no engine constants (the `CONFIG`
+> values described below are now authored Ruleset/move data), Heat/Rage/supers exist.
 
 *A readable, mechanic-by-mechanic tour of everything the engine actually implements.*
 

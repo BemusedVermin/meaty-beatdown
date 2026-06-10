@@ -1,5 +1,8 @@
 # Finite State Machine
 
+*Updated 2026-06-09 for spec v2 (`frame_rpg_spec.md`): party battles on target-lanes, the fog of
+war, grab-break and burst reaction windows. Diagram structure is otherwise unchanged.*
+
 ## Overall State Diagram
 
 ```mermaid
@@ -80,9 +83,13 @@ Combat is no longer a `GameState` value: engaging an encounter raises the orthog
 
 ## Exploration State Diagram
 
-Expands `GameState::Exploration`. A **hexgrid overworld**: you travel hex to hex, and **encounters are visible tokens on the map** (no random encounters) alongside points of interest — shops, skill trainers, and the entrances to **dungeons** sprinkled through the world. What pulls you into fights is the payoff — the combat itself plus **Diablo / Borderlands-style loot** — not a punishing grind.
+Expands `GameState::Exploration`. A **hexgrid overworld of fog and islands** (see
+[`exploration.md`](./exploration.md)): you sail hex to hex through the Fog, and **encounters are
+visible tokens on the map** (no random encounters) alongside points of interest — ports, trainers,
+masters' anchor islands, and the entrances to **dungeons**. What pulls you into fights is the
+payoff — the combat itself plus **Diablo / Borderlands-style loot** — not a punishing grind.
 
-**Navigation vs combat:** the hexgrid is the *navigation layer only*. Engaging an encounter raises the fighting engine as an overlay (the orthogonal `CombatState` axis), which uses the 1D-lane spacing model while the overworld is frozen beneath it — the hex map is never the combat arena. Two spatial models, cleanly separated.
+**Navigation vs combat:** the hexgrid is the *navigation layer only*. Engaging an encounter raises the fighting engine as an overlay (the orthogonal `CombatState` axis), which uses the target-lane arena model (spec §3) while the overworld is frozen beneath it — the hex map is never the combat arena. Two spatial models, cleanly separated; the engaged hex authors the `ArenaDef` (walls, hazards — `exploration.md` §8).
 
 ```mermaid
 stateDiagram-v2
@@ -105,8 +112,8 @@ stateDiagram-v2
     Loot --> Overworld: collected
     note right of Combat
         = the CombatState overlay (the fighting engine), raised over a frozen
-        Overworld — not a peer sub-state. Walk into a visible enemy and the
-        battle begins — no preview. Travel is hex; the fight is 1D-lane spacing.
+        Overworld — not a peer sub-state. Sail into a visible token and the
+        battle begins — no preview. Travel is hex; the fight is a target-lane arena.
     end note
 ```
 
@@ -199,11 +206,11 @@ stateDiagram-v2
 *Bevy: a top-level `States` (`CombatState`, default `Dormant`), orthogonal to `GameState` and frozen by `PauseState` — not a `SubState`. The `Fight` value's tick loop is the `FightState` sub-state.*
 
 - **Dormant** — No fight in progress; the overlay is off and the world context (`Exploration` / `Dialogue`) runs. The default. `engage encounter` raises the overlay → `InitializeFight`.
-- **InitializeFight** — One-time setup: spawn the actors, assign sides, place them in the arena, and build their runtime state. Auto-advances to `Introductions`.
+- **InitializeFight** — One-time setup: author the `ArenaDef` from the engaged hex (walls, hazards — `exploration.md` §8), spawn the actors, assign sides and initial targets, place them in the arena, and build their runtime state (compiled Fighters, meters, latches). Auto-advances to `Introductions`.
 - **Introductions** — Pre-fight presentation (character intros, "Fight!"). → `Fight` when `intro finished`.
-- **Fight** — The live exchange; the shared-tick simulation runs here. Actors belong to **sides**, and a side is out when all its actors reach `KO`. The outcome is evaluated each tick and breaks out to `Victory` (only the player's side remains), `Defeat` (the player's side is eliminated), or `Escape` (the player's side disengages).
+- **Fight** — The live exchange; the shared-tick simulation runs here. Actors belong to **sides** (party battles are the normal case — the player commits for every allied actor), and a side is out when all its actors reach `KO`. The outcome is evaluated each tick and breaks out to `Victory` (only the player's side remains), `Defeat` (the player's side is eliminated — a full wipe; companion KOs alone don't end the fight), or `Escape` (the player's side disengages).
   - **Advancing** — The engine advances the shared tick clock and applies any contacts resolving this tick. Self-loops while `Nobody ready`.
-  - **AwaitInput** — Entered when `an actor is ready` (its `ready_tick` is up): the engine collects the ready actor(s)' chosen actions — "actors produce frame" — then returns to `Advancing` once `action(s) committed`.
+  - **AwaitInput** — Entered when any decision is pending at the current tick: a **Ready** actor, an open **Cancel** window, a **Reaction** window (throw break, burst), or a **Wake-up** choice (spec §4.1). Same-tick decisions are gathered and committed **side-blind** (spec §4.2): each side commits all of its actors' choices without seeing the other side's same-tick commitments; intent stays fogged either way (spec §7). Returns to `Advancing` once `action(s) committed`.
 - **Victory** — The player's side is the last standing (all hostile sides eliminated); shows the victory screen, then lowers the overlay (→ `Dormant`). The frozen world context resumes and routes the retained `Exploration` / `Dungeon` layer to `Loot`.
 - **Defeat** — The player's side is eliminated; shows the defeat screen, then lowers the overlay (→ `Dormant`). Soft loss — the frozen world context (already `Exploration`) resumes (may change later).
 - **Escape** — The player's side disengages; shows the escape screen, then lowers the overlay (→ `Dormant`); the world context resumes.
@@ -230,9 +237,10 @@ stateDiagram-v2
     GuardBroken --> Idle: guard recovers
     GuardBroken --> Hitstun: punished
 
-    %% ── Throws ────────────────────────────────
-    Idle --> Thrown: grabbed
-    Idle --> Teched: throw teched (mutual)
+    %% ── Throws (grab → directional break read) ─
+    Idle --> Grabbed: grab connects ▶
+    Grabbed --> Teched: break correct / mutual throw
+    Grabbed --> Thrown: break wrong / declined
     Teched --> Idle: reset
     Thrown --> KnockedDown: thrown down
 
@@ -251,7 +259,14 @@ stateDiagram-v2
     %% ── Launch / juggle ───────────────────────
     Hitstun --> Airborne: launched
     Airborne --> Airborne: juggled (further hit)
+    Airborne --> WallSplat: carried into a wall
+    WallSplat --> Airborne: picked up (juggled)
+    WallSplat --> KnockedDown: splat window ends
     Airborne --> KnockedDown: lands
+
+    %% ── Burst (once per fight, ▶ via reaction window) ─
+    Hitstun --> Idle: BURST ▶
+    Airborne --> Idle: BURST ▶
 
     %% ── Knockdown + wake-up (oki) ─────────────
     Hitstun --> KnockedDown: knockdown
@@ -271,6 +286,12 @@ stateDiagram-v2
 
 *Bevy: a per-actor **component** — one instance per fighter, not a global `States`. Lives while `Combat` is in `Fight`. ▶ = the actor feeds the engine input; ✖ = locked, only receives.*
 
+*Orthogonal per-actor axes, deliberately **not** states in this machine: **stance**
+(standing / crouching — a held quality that changes height interactions, spec §5.2), **target**
+(who this actor's lane points at, spec §3.2), and the **Heat / Rage latches** (spec §9.5–9.6).
+`Crumple` is a data-flavored `Hitstun` variant; `Screw`/`Bound` are data-flavored `Airborne`
+juggle events — the reaction union (spec §6.1) flavors these states rather than multiplying them.*
+
 **Offense**
 - **Idle** ▶ — Neutral and fully actionable; auto-faces the opponent. The actor chooses its next action here. → `Startup` (move), `Blockstun` (block), `Hitstun` / `Thrown` (attacked).
 - **Startup** ✖ — Committed to a move, winding up (the move's `startup` frames). Vulnerable to counter-hits.
@@ -282,25 +303,30 @@ stateDiagram-v2
 - **GuardBroken** ✖ — Guard shattered: a long, punishable stun. → `Idle` on recovery; → `Hitstun` if punished.
 
 **Throws**
-- **Thrown** ✖ — Grabbed (the tech window already passed). → `KnockedDown`.
-- **Teched** ✖ — Mutual throw clash; transient, no damage. → `Idle`.
+- **Grabbed** ▶ — A grab has connected; the **break reaction window** is open (spec §5.4): guess the throw's break key (L / R) or decline. Correct → `Teched`; wrong or declined → `Thrown`.
+- **Thrown** ✖ — The throw's hit events run. → `KnockedDown`.
+- **Teched** ✖ — Break succeeded or mutual same-tick throws clashed; transient, no damage, small separation. → `Idle`.
 
 **Hit reactions**
 - **Hitstun** ✖ — Reeling from a clean hit for the move's `hitstun`. → `Idle`; → `Airborne` if launched; → `KnockedDown` if knocked down; → `KO` at 0 health.
 - **Parried** ✖ — This actor's *own* attack was parried: frozen and punishable. → `Idle` on freeze end; → `Hitstun` if punished.
 
 **Juggle & okizeme**
-- **Airborne** ✖ — Launched into a juggle; can be re-hit (the self-loop extends air hitstun). → `KnockedDown` on landing; → `KO` at 0 health.
+- **Airborne** ✖▶ — Launched into a juggle; can be re-hit (the self-loop extends air hitstun; decay governors apply, spec §6.5). Each hit opens a **burst reaction window** (▶) if Burst is affordable and unused. → `WallSplat` if carried into a splat-able wall (once per combo); → `KnockedDown` on landing; → `KO` at 0 health.
+- **WallSplat** ✖ — Stuck on the wall, juggleable for an authored window (once per combo). → `Airborne` on pickup; → `KnockedDown` when the window ends.
 - **KnockedDown** ✖ — On the ground (okizeme). → `WakeUp` when the wake-up timer elapses.
-- **WakeUp** ▶ — Getting up; may offer a reversal action (▶) → `Startup`. → `Idle` when recovered; → `Hitstun` on a meaty.
+- **WakeUp** ▶ — The wake-up decision (spec §6.3): rise in place / back rise / delayed rise / any `state=DOWN` move including reversals (▶) → `Startup`. → `Idle` when recovered; → `Hitstun` on a meaty.
+
+**Burst** — from `Hitstun`/`Airborne`, the victim may spend the once-per-fight Burst (large Focus cost) at a hit-opened reaction window: brief invulnerability, radial push, both actors reset → `Idle` (spec §8.5). Ally interruption needs no state here — it's emergent (hitting the comboer is just a hit, spec §8.4).
 
 **End**
 - **KO** ✖ — Health depleted; out of the fight (terminal). Each `KO` removes an actor from its side; when a side's last actor is `KO`, that side is eliminated — which is what the `Fight` FSM checks for its outcome.
 
 ## Open questions
 
-- **Defeat handling — decided: soft loss.** `Combat` defeat returns to `Exploration`; no Game Over / checkpoint reload for now (may change later).
-- **Many competitors — decided: elimination.** Actors belong to **sides**; a side is out when all its actors are `KO`, and the fight ends when one side remains. `Victory` = the player's side is last standing; `Defeat` = the player's side is eliminated. Free-for-all is the degenerate case where each actor is its own side.
+- **Defeat handling — decided: soft loss.** `Combat` defeat returns to `Exploration` (wake at the last anchorage with an authored setback — `exploration.md` §4.4); no Game Over / checkpoint reload for now (may change later).
+- **Many competitors — decided: party battles are the normal case.** Actors belong to **sides** (player side designed for 3; N is a knob); the player commits for every allied actor; a side is out when all its actors are `KO`, and the fight ends when one side remains. `Victory` = the player's side is last standing; `Defeat` = full party wipe. Free-for-all is the degenerate case where each actor is its own side.
+- **Information — decided: fog of war (spec §7).** All decision collection in `AwaitInput` is side-blind; the UI and AI consume the same Observation API. The FSMs are unaffected beyond the `AwaitInput` semantics above.
 - **Rounds & timer — decided: neither**, with two consequences to handle: (1) **termination** — with no clock, a turtling/stalemate bout never ends, so keep a hard tick cap (a `max_ticks` safety bound) so replays and AI-vs-AI are guaranteed to terminate; (2) **double-KO** — define the result when the last actors of two sides die on the same tick (mutual defeat / no-contest / draw), since there's no timer to break the tie. No round resets ⇒ no per-round heal/positioning reset (a design consequence, not a bug).
 - **Pause & game lifetime — decided: orthogonal.** `Pause` is its own state axis (`PauseState`), not a value inside `AppState`, and the gameplay is a separate `GameState` instance gated by run-conditions. Because pausing never exits the game machine, nothing is torn down — no sub-state stash/restore needed.
 - **Combat topology — decided: orthogonal overlay.** `Combat` is its own axis (`CombatState`, default `Dormant`), *not* a `GameState` value. Engaging an encounter raises it over a *frozen* `Exploration` / `Dialogue` (the same freeze pattern as `Pause`), so returning from a fight restores the exact world context — including the `ExplorationState` / `DungeonState` sub-state you were in — with no stash/restore. (Replaces the earlier `GameState::Combat` sibling model, which reset those sub-states to their defaults on return.)
