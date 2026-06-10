@@ -23,8 +23,10 @@ regenerated from the new engine (see `docs/tech-plan.md` §2).
     edit only on explicit request.
   - `tech-plan.md` / `implementation-plan.md` — architecture and the phased build plan.
   - `archive/` — v1 prototype docs, historical only (banners explain the divergences).
-- **`notes/`** — gitignored working notes: the decision log from the design sessions
-  (`01-decisions.md`, `02-final-answers.md`). Check these before re-asking settled questions.
+- **`notes/`** — the committed decision log from the design sessions (`01-decisions.md`,
+  `02-final-answers.md`, …). Check these before re-asking settled questions. They record *why*
+  and *that it was decided* — they are not canon; on any conflict, `docs/` wins. Throwaway
+  scratch goes in `notes/scratch/` (gitignored).
 
 ## Working agreement (binding)
 

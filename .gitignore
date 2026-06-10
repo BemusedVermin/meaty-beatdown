@@ -34,7 +34,8 @@ yarn-error.log*
 Thumbs.db
 Desktop.ini
 
-# Working notes (scratch space, not part of the design)
-notes/
+# The decision log in notes/ is committed (it's an ADR log in all but name);
+# only genuinely throwaway scratch stays out of history.
+notes/scratch/
 
 # NOTE: golden/*.json are committed cross-language contract artifacts — do NOT ignore them.
