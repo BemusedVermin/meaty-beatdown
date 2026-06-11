@@ -90,6 +90,7 @@ fn hidden_meters_do_not_distinguish() {
                     engine::core::fx::fx(6),
                 ),
                 walls: engine::data::Walls::default(),
+                hazards: vec![],
             },
             ruleset: ruleset(),
             entities: vec![

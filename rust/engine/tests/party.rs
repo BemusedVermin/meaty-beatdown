@@ -38,6 +38,7 @@ fn party(entities: Vec<EntitySetup>, max_ticks: u64) -> CombatSim {
         arena: ArenaDef {
             half_extents: FxVec2::new(fx(12), fx(8)),
             walls: Walls::default(),
+            hazards: vec![],
         },
         ruleset: ruleset(),
         entities,

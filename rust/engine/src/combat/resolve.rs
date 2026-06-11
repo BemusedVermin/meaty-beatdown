@@ -46,7 +46,7 @@ fn active_properties(defender: &Entity, t: Tick) -> impl Iterator<Item = Propert
 fn invuln_covers(cover: InvulnCover, category: MoveCategory) -> bool {
     match cover {
         InvulnCover::All => true,
-        InvulnCover::Strike => category == MoveCategory::Strike,
+        InvulnCover::Strike => matches!(category, MoveCategory::Strike | MoveCategory::Projectile),
         InvulnCover::Throw => category == MoveCategory::Throw,
     }
 }

@@ -32,7 +32,7 @@ pub enum Reaction {
 }
 
 /// One contact within a move's active window (spec §2.2). Multi-hit moves author several.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HitEvent {
     /// Tick offset within the active window (0 = the first active tick). For THROWs,
     /// offsets are measured from the grab's connect tick.

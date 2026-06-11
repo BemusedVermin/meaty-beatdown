@@ -10,7 +10,7 @@
 //! where the policy's "declining a library is legitimate when it would cost correctness"
 //! clause applies to a single function.
 
-use crate::data::movedef::{GainGate, GainResource, Move, MoveCategory};
+use crate::data::movedef::{GainGate, GainResource, Move, MoveCategory, Tracking};
 use crate::data::{MoveId, Reaction, Ruleset};
 use petgraph::algo::tarjan_scc;
 use petgraph::graph::{DiGraph, NodeIndex};
@@ -23,6 +23,8 @@ pub struct AuditReport {
     /// The proven worst-case combo length under the Ruleset's decay (governor 7 bound);
     /// property tests assert fuzzed fights never exceed it.
     pub combo_bound: u32,
+    /// Structural Phase 5 budget-axis coverage. Numeric residuals remain playtest-owned.
+    pub budget_axes: BudgetAxes,
 }
 
 impl AuditReport {
@@ -36,11 +38,23 @@ impl AuditReport {
     }
 }
 
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub struct BudgetAxes {
+    pub wide_arc: u32,
+    pub tracking: u32,
+    pub meter: u32,
+    pub cue_lie: u32,
+    pub heat: u32,
+    pub projectile: u32,
+    pub super_move: u32,
+}
+
 /// Run the Phase 2 audit over a movelist + ruleset.
 #[must_use]
 pub fn audit(moves: &[Move], ruleset: &Ruleset) -> AuditReport {
     let mut report = AuditReport::default();
     sanity(moves, &mut report);
+    budget_axes(moves, &mut report);
     cancel_cycles(moves, &mut report);
     report.combo_bound = juggle_termination(moves, ruleset, &mut report);
     report
@@ -59,7 +73,7 @@ fn sanity(moves: &[Move], report: &mut AuditReport) {
                 .push(format!("{} ({:?}): {what}", m.name, m.id));
         };
         match m.category {
-            MoveCategory::Strike => {
+            MoveCategory::Strike | MoveCategory::Projectile => {
                 if m.hits.is_empty() && m.properties.is_empty() {
                     err(report, "strike with no hits and no properties");
                 }
@@ -90,6 +104,23 @@ fn sanity(moves: &[Move], report: &mut AuditReport) {
             }
             MoveCategory::Motion | MoveCategory::Utility => {}
         }
+        if m.flags.heat_only && m.flags.heat_burst {
+            err(report, "move cannot be both heat_only and heat_burst");
+        }
+        if m.flags.rage_art && m.flags.heat_only {
+            err(
+                report,
+                "rage_art and heat_only are separate escalation gates",
+            );
+        }
+        if let Some(p) = m.flags.projectile {
+            if p.spawn_at >= m.timing.active {
+                err(report, "projectile spawn offset outside active window");
+            }
+            if p.lifetime == 0 || p.speed <= crate::core::fx::Fx::ZERO {
+                err(report, "projectile must have positive speed and lifetime");
+            }
+        }
         for w in &m.properties {
             if w.from > w.to || w.to >= m.timing.total() {
                 err(report, "property window outside the move");
@@ -114,6 +145,36 @@ fn sanity(moves: &[Move], report: &mut AuditReport) {
             if g.gate == GainGate::Always && g.resource == GainResource::Ap {
                 err(report, "unconditional AP gain (R-5)");
             }
+        }
+    }
+}
+
+fn budget_axes(moves: &[Move], report: &mut AuditReport) {
+    let mut cue_counts: HashMap<_, u32> = HashMap::new();
+    for m in moves {
+        *cue_counts.entry((m.form, m.cue)).or_default() += 1;
+    }
+    for m in moves {
+        if m.region.arc_halfwidth > crate::core::fx::Fx::ONE {
+            report.budget_axes.wide_arc += 1;
+        }
+        if !matches!(m.tracking, Tracking::Linear) {
+            report.budget_axes.tracking += 1;
+        }
+        if !m.gains.is_empty() || m.cost.focus > 0 {
+            report.budget_axes.meter += 1;
+        }
+        if cue_counts.get(&(m.form, m.cue)).copied().unwrap_or(0) > 1 {
+            report.budget_axes.cue_lie += 1;
+        }
+        if m.flags.heat_burst || m.flags.heat_engager || m.flags.heat_only {
+            report.budget_axes.heat += 1;
+        }
+        if m.flags.projectile.is_some() || m.category == MoveCategory::Projectile {
+            report.budget_axes.projectile += 1;
+        }
+        if m.flags.super_move || m.flags.ex || m.flags.rage_art {
+            report.budget_axes.super_move += 1;
         }
     }
 }

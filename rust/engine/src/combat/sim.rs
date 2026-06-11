@@ -26,10 +26,12 @@ use crate::core::fx::{Fx, FxVec2};
 use crate::core::ids::{EntityId, SideId};
 use crate::core::tick::Tick;
 use crate::data::movedef::{
-    CancelGate, CancelWindow, GainGate, GainResource, Move, MoveCategory, PropertyKind, StanceKind,
-    StanceReq,
+    CancelGate, CancelWindow, GainGate, GainResource, Height, Move, MoveCategory, ProjectileSpec,
+    PropertyKind, ReachEnvelope, StanceKind, StanceReq,
 };
-use crate::data::{ArenaDef, DefenseProfile, KnowledgeBook, MoveId, Reaction, Ruleset};
+use crate::data::{
+    ArenaDef, DefenseProfile, HazardTrigger, KnowledgeBook, MoveId, Reaction, Ruleset,
+};
 use crate::trace::{ThrowResolution, TraceEvent};
 
 use super::entity::{ActorState, ComboTracker, Entity, MoveInstance, MovePhase, Stance};
@@ -90,6 +92,24 @@ struct PendingGrab {
     victim: usize,
 }
 
+#[derive(Clone, Debug)]
+struct Projectile {
+    id: u32,
+    owner: EntityId,
+    side: SideId,
+    pos: FxVec2,
+    facing: FxVec2,
+    spec: ProjectileSpec,
+    source: MoveId,
+    expires_at: Tick,
+}
+
+#[derive(Copy, Clone, Debug, Default)]
+struct HazardRuntime {
+    fired: bool,
+    next_ready: Tick,
+}
+
 pub struct CombatSim {
     t: Tick,
     /// Sorted by id at construction: stable entity-id order is the same-tick
@@ -102,6 +122,9 @@ pub struct CombatSim {
     stage: Stage,
     batch: Option<CommitBatch>,
     grabs: Vec<PendingGrab>,
+    projectiles: Vec<Projectile>,
+    next_projectile_id: u32,
+    hazards: Vec<HazardRuntime>,
     over: Option<Option<SideId>>,
     trace: Vec<TraceEvent>,
 }
@@ -132,6 +155,10 @@ impl CombatSim {
                 breath_regen_acc: 0,
                 ap: e.defense.ap_max,
                 focus: 0,
+                heat_until: None,
+                heat_used: false,
+                rage: false,
+                rage_art_used: false,
                 burst_used: false,
                 combo: ComboTracker::default(),
                 moves: e.moves,
@@ -142,6 +169,7 @@ impl CombatSim {
         let trace = vec![TraceEvent::SimStarted {
             entities: entities.iter().map(|e| e.id).collect(),
         }];
+        let hazards = sim_hazards(&config.arena);
         let mut sim = Self {
             t: Tick::ZERO,
             entities,
@@ -152,6 +180,9 @@ impl CombatSim {
             stage: Stage::TickStart,
             batch: None,
             grabs: Vec::new(),
+            projectiles: Vec::new(),
+            next_projectile_id: 1,
+            hazards,
             over: None,
             trace,
         };
@@ -171,6 +202,7 @@ impl CombatSim {
         ruleset: Ruleset,
     ) -> Self {
         entities.sort_by_key(|e| e.id);
+        let hazards = sim_hazards(&arena);
         Self {
             t,
             entities,
@@ -181,6 +213,9 @@ impl CombatSim {
             stage: Stage::TickStart,
             batch: None,
             grabs: Vec::new(),
+            projectiles: Vec::new(),
+            next_projectile_id: 1,
+            hazards,
             over: None,
             trace: Vec::new(),
         }
@@ -213,7 +248,11 @@ impl CombatSim {
                 Stage::World => {
                     if self.grabs.is_empty() {
                         self.integrate_motion();
+                        self.integrate_projectiles();
                         self.run_contacts();
+                        self.run_projectile_clashes();
+                        self.run_projectile_contacts();
+                        self.run_hazards();
                     }
                     if !self.grabs.is_empty() {
                         if self.batch.as_ref().is_none_or(|b| !b.complete()) {
@@ -328,6 +367,13 @@ impl CombatSim {
     fn upkeep_start(&mut self) {
         let t = self.t;
         for i in 0..self.entities.len() {
+            if self.entities[i].heat_until == Some(t) {
+                self.entities[i].heat_until = None;
+                self.trace.push(TraceEvent::HeatEnded {
+                    t,
+                    actor: self.entities[i].id,
+                });
+            }
             // Move completion / stance-hold entry.
             if self.entities[i].state == ActorState::Acting {
                 let mv = self.entities[i].current_move().expect("acting has a move");
@@ -607,6 +653,15 @@ impl CombatSim {
         if mv.flags.burst {
             return Err(CommitError::UnknownOrUnmetMove { actor });
         }
+        if mv.flags.heat_only && entity.heat_until.is_none() {
+            return Err(CommitError::UnknownOrUnmetMove { actor });
+        }
+        if mv.flags.heat_burst && entity.heat_used {
+            return Err(CommitError::UnknownOrUnmetMove { actor });
+        }
+        if mv.flags.rage_art && (!entity.rage || entity.rage_art_used) {
+            return Err(CommitError::UnknownOrUnmetMove { actor });
+        }
         if !Self::affordable(entity, mv) {
             return Err(CommitError::Denied { actor });
         }
@@ -864,6 +919,8 @@ impl CombatSim {
             .unwrap_or(0);
         let keeps_crouch = mv.req_stance == Some(StanceReq::Crouching);
         let is_burst = mv.flags.burst;
+        let heat_burst = mv.flags.heat_burst;
+        let rage_art = mv.flags.rage_art;
         let cost = mv.cost;
         let always_gains: Vec<(GainResource, u32)> = mv
             .gains
@@ -878,6 +935,10 @@ impl CombatSim {
         if is_burst {
             e.burst_used = true;
         }
+        if rage_art {
+            e.rage_art_used = true;
+            e.rage = false;
+        }
         e.current = Some(MoveInstance {
             move_id: id,
             move_index: index,
@@ -888,6 +949,7 @@ impl CombatSim {
             hit_landed: false,
             blocked: false,
             cancels_prompted: 0,
+            projectile_spawned: false,
         });
         e.state = ActorState::Acting;
         e.held = None;
@@ -899,6 +961,9 @@ impl CombatSim {
         };
         for (resource, amount) in always_gains {
             self.gain(i, resource, amount);
+        }
+        if heat_burst {
+            self.start_heat(i);
         }
     }
 
@@ -923,6 +988,22 @@ impl CombatSim {
             GainResource::Ap => e.ap = (e.ap + amount).min(e.defense.ap_max),
             GainResource::Focus => e.focus = (e.focus + amount).min(e.defense.focus_max),
         }
+    }
+
+    fn start_heat(&mut self, i: usize) {
+        if self.entities[i].heat_used {
+            return;
+        }
+        let duration = self.entities[i].defense.heat_duration.max(1);
+        let until = self.t + u64::from(duration);
+        let e = &mut self.entities[i];
+        e.heat_used = true;
+        e.heat_until = Some(until);
+        self.trace.push(TraceEvent::HeatStarted {
+            t: self.t,
+            actor: e.id,
+            until,
+        });
     }
 
     /// Apply an actor's authored gains for a gate from its live in-flight move (the
@@ -975,6 +1056,7 @@ impl CombatSim {
                     hit_landed: false,
                     blocked: false,
                     cancels_prompted: 0,
+                    projectile_spawned: false,
                 });
             }
             None => {
@@ -1072,6 +1154,14 @@ impl CombatSim {
                 continue;
             }
             let active_offset = elapsed - mv.timing.startup;
+            if let Some(spec) = mv.flags.projectile
+                && spec.spawn_at == active_offset
+                && !self.entities[ai]
+                    .current
+                    .is_some_and(|inst| inst.projectile_spawned)
+            {
+                self.spawn_projectile(ai, mv.id, spec);
+            }
 
             match mv.category {
                 MoveCategory::Throw => {
@@ -1119,7 +1209,10 @@ impl CombatSim {
                         }
                     }
                 }
-                MoveCategory::Strike | MoveCategory::Motion | MoveCategory::Utility => {
+                MoveCategory::Strike
+                | MoveCategory::Projectile
+                | MoveCategory::Motion
+                | MoveCategory::Utility => {
                     if mv.flags.revive_hp > 0 && active_offset == 0 {
                         if let Some(victim) = snapshot.iter().find(|e| e.id == attacker.target)
                             && victim.side == attacker.side
@@ -1183,6 +1276,313 @@ impl CombatSim {
                 pending,
                 committed: std::collections::BTreeMap::new(),
             });
+        }
+    }
+
+    fn spawn_projectile(&mut self, owner: usize, source: MoveId, spec: ProjectileSpec) {
+        let id = self.next_projectile_id;
+        self.next_projectile_id += 1;
+        if let Some(inst) = &mut self.entities[owner].current {
+            inst.projectile_spawned = true;
+        }
+        let p = Projectile {
+            id,
+            owner: self.entities[owner].id,
+            side: self.entities[owner].side,
+            pos: self.entities[owner].pos,
+            facing: self.entities[owner].facing,
+            spec,
+            source,
+            expires_at: self.t + u64::from(spec.lifetime.max(1)),
+        };
+        self.projectiles.push(p);
+        self.trace.push(TraceEvent::ProjectileSpawned {
+            t: self.t,
+            projectile: id,
+            owner: self.entities[owner].id,
+            source,
+        });
+    }
+
+    fn integrate_projectiles(&mut self) {
+        let t = self.t;
+        for p in &mut self.projectiles {
+            p.pos += p.facing * p.spec.speed;
+        }
+        let arena = &self.arena;
+        self.projectiles.retain(|p| {
+            p.expires_at > t
+                && p.pos.x >= -arena.half_extents.x
+                && p.pos.x <= arena.half_extents.x
+                && p.pos.y >= -arena.half_extents.y
+                && p.pos.y <= arena.half_extents.y
+        });
+    }
+
+    fn run_projectile_clashes(&mut self) {
+        let mut remove = std::collections::BTreeSet::new();
+        for a in 0..self.projectiles.len() {
+            for b in (a + 1)..self.projectiles.len() {
+                if self.projectiles[a].side == self.projectiles[b].side {
+                    continue;
+                }
+                if projectile_overlaps(&self.projectiles[a], &self.projectiles[b]) {
+                    remove.insert(self.projectiles[a].id);
+                    remove.insert(self.projectiles[b].id);
+                    self.trace.push(TraceEvent::ProjectileClashed {
+                        t: self.t,
+                        a: self.projectiles[a].id,
+                        b: self.projectiles[b].id,
+                    });
+                }
+            }
+        }
+        if !remove.is_empty() {
+            self.projectiles.retain(|p| !remove.contains(&p.id));
+        }
+    }
+
+    fn run_projectile_contacts(&mut self) {
+        let snapshot = self.entities.clone();
+        let projectiles = self.projectiles.clone();
+        let mut remove = std::collections::BTreeSet::new();
+        for p in projectiles {
+            let Some(ai) = self.entities.iter().position(|e| e.id == p.owner) else {
+                remove.insert(p.id);
+                continue;
+            };
+            let mv = projectile_move(&p);
+            for (vi, victim) in snapshot.iter().enumerate() {
+                if victim.id == p.owner
+                    || (victim.side == p.side && !p.spec.friendly_fire)
+                    || victim.state == ActorState::Ko
+                {
+                    continue;
+                }
+                if !projectile_hits(&p, victim) {
+                    continue;
+                }
+                let back_hit = is_back_hit(&self.entities[ai], victim);
+                let outcome = resolve::resolve_contact(&mv, &p.spec.hit, victim, self.t, back_hit);
+                self.apply_projectile_outcome(p.id, ai, vi, &mv, outcome);
+                remove.insert(p.id);
+                break;
+            }
+        }
+        if !remove.is_empty() {
+            self.projectiles.retain(|p| !remove.contains(&p.id));
+        }
+    }
+
+    fn run_hazards(&mut self) {
+        let t = self.t;
+        for hi in 0..self.arena.hazards.len() {
+            let hazard = self.arena.hazards[hi].clone();
+            let runtime = self.hazards[hi];
+            let ready = match hazard.trigger {
+                HazardTrigger::Once => !runtime.fired,
+                HazardTrigger::Cooldown { .. } => runtime.next_ready <= t,
+                HazardTrigger::Always => true,
+            };
+            if !ready {
+                continue;
+            }
+            for vi in 0..self.entities.len() {
+                if self.entities[vi].state == ActorState::Ko
+                    || !point_in_rect(self.entities[vi].pos, hazard.center, hazard.half_extents)
+                {
+                    continue;
+                }
+                self.damage(vi, hazard.damage);
+                if self.entities[vi].state != ActorState::Ko
+                    && let Some(reaction) = hazard.reaction
+                {
+                    self.apply_environment_reaction(vi, reaction);
+                }
+                self.trace.push(TraceEvent::HazardTriggered {
+                    t,
+                    hazard: hazard.id,
+                    victim: self.entities[vi].id,
+                    damage: hazard.damage,
+                    reaction: hazard.reaction,
+                });
+                match hazard.trigger {
+                    HazardTrigger::Once => self.hazards[hi].fired = true,
+                    HazardTrigger::Cooldown { ticks } => {
+                        self.hazards[hi].next_ready = t + u64::from(ticks.max(1));
+                    }
+                    HazardTrigger::Always => {}
+                }
+            }
+        }
+    }
+
+    fn apply_projectile_outcome(
+        &mut self,
+        projectile: u32,
+        ai: usize,
+        vi: usize,
+        mv: &Move,
+        outcome: ContactOutcome,
+    ) {
+        let t = self.t;
+        let hit = mv.hits[0];
+        let mut damage_applied = 0u32;
+        let mut reaction_applied = None;
+        let mut combo_hits = 0u32;
+        match outcome {
+            ContactOutcome::Whiff => {}
+            ContactOutcome::ThrowTech | ContactOutcome::GrabConnected => {}
+            ContactOutcome::Parried {
+                freeze_attacker: _,
+                parry_recovery,
+            } => {
+                self.move_gains(vi, GainGate::OnParry);
+                let parry_focus = self.ruleset.focus_gains.parry;
+                self.gain(vi, GainResource::Focus, parry_focus);
+                let v = &mut self.entities[vi];
+                v.current = None;
+                v.state = ActorState::Free;
+                v.ready_tick = t + u64::from(parry_recovery);
+                v.ap = v.defense.ap_max;
+            }
+            ContactOutcome::Blocked => {
+                self.move_gains_from(ai, mv, GainGate::OnBlock);
+                let blocked_focus = self.ruleset.focus_gains.hit_blocked;
+                self.gain(ai, GainResource::Focus, blocked_focus);
+                let push = self.entities[ai].facing * hit.block_push;
+                let v = &mut self.entities[vi];
+                v.guard = v.guard.saturating_sub(hit.chip_guard);
+                if v.guard == 0 {
+                    v.held = None;
+                    v.state = ActorState::GuardBroken {
+                        until: t + u64::from(self.ruleset.guard_break_stun),
+                    };
+                    self.trace.push(TraceEvent::GuardBroken { t, actor: v.id });
+                } else {
+                    v.state = ActorState::Blockstun {
+                        until: t + u64::from(hit.blockstun),
+                    };
+                }
+                let pos = spatial::clamp_to_arena(&self.arena, self.entities[vi].pos + push).0;
+                self.entities[vi].pos = pos;
+            }
+            ContactOutcome::Armored => {
+                let mult = self.entities[vi]
+                    .current_move()
+                    .into_iter()
+                    .flat_map(|m| m.properties.iter())
+                    .find_map(|w| match w.kind {
+                        PropertyKind::Armor { dmg_mult, .. } => Some(dmg_mult),
+                        _ => None,
+                    })
+                    .unwrap_or(Fx::ONE);
+                damage_applied = scale_damage(hit.damage, mult);
+                if let Some(inst) = &mut self.entities[vi].current {
+                    inst.armor_hits_left = inst.armor_hits_left.saturating_sub(1);
+                }
+                self.damage(vi, damage_applied);
+            }
+            ContactOutcome::Hit { counter } => {
+                if !self.entities[vi].in_combo_state() {
+                    self.entities[vi].combo = ComboTracker::default();
+                }
+                let combo_index = self.entities[vi].combo.hits;
+                let airborne = matches!(
+                    self.entities[vi].state,
+                    ActorState::Airborne { .. } | ActorState::WallSplat { .. }
+                );
+                self.move_gains_from(ai, mv, GainGate::OnHit);
+                let land_focus = self.ruleset.focus_gains.land_hit;
+                self.gain(ai, GainResource::Focus, land_focus);
+                let (mut reaction, mut damage) = if counter {
+                    match hit.ch_reaction {
+                        Some(ch) => (ch, hit.damage),
+                        None => {
+                            let boosted = match hit.reaction {
+                                Reaction::Hitstun { ticks } => Reaction::Hitstun {
+                                    ticks: ticks + self.ruleset.ch_default.stun_bonus,
+                                },
+                                other => other,
+                            };
+                            (
+                                boosted,
+                                scale_damage(hit.damage, self.ruleset.ch_default.damage_mult),
+                            )
+                        }
+                    }
+                } else {
+                    (hit.reaction, hit.damage)
+                };
+                if self.entities[ai].rage {
+                    damage = scale_damage(damage, self.entities[ai].defense.rage_damage_mult);
+                }
+                if airborne {
+                    let weight = self.entities[vi].defense.weight;
+                    damage = self.juggle_damage(combo_index, weight, damage);
+                }
+                damage_applied = damage;
+                self.damage(vi, damage);
+                if self.entities[vi].state != ActorState::Ko {
+                    if !airborne {
+                        reaction = match reaction {
+                            Reaction::Screw { stun, .. } | Reaction::Bound { stun } => {
+                                Reaction::Hitstun { ticks: stun }
+                            }
+                            other => other,
+                        };
+                    }
+                    self.entities[vi].combo.hits = combo_index + 1;
+                    combo_hits = combo_index + 1;
+                    self.apply_reaction(ai, vi, &hit, reaction, combo_index);
+                    reaction_applied = Some(reaction);
+                }
+            }
+        }
+        self.trace.push(TraceEvent::ProjectileContact {
+            t,
+            projectile,
+            attacker: self.entities[ai].id,
+            victim: self.entities[vi].id,
+            source: mv.id,
+            outcome,
+            damage: damage_applied,
+            reaction: reaction_applied,
+            combo_hits,
+        });
+    }
+
+    fn apply_environment_reaction(&mut self, vi: usize, reaction: Reaction) {
+        let t = self.t;
+        self.interrupt_actor(vi);
+        match reaction {
+            Reaction::Hitstun { ticks } | Reaction::Crumple { ticks } => {
+                self.entities[vi].state = ActorState::Hitstun {
+                    until: t + u64::from(ticks.max(1)),
+                };
+                self.entities[vi].stance = Stance::Standing;
+            }
+            Reaction::Launch { rise, stun, .. } => {
+                self.entities[vi].state = ActorState::Airborne {
+                    stun_until: t + u64::from(stun.max(1)),
+                };
+                self.entities[vi].stance = Stance::Airborne;
+                self.entities[vi].height_off = rise;
+            }
+            Reaction::Screw { stun, .. } | Reaction::Bound { stun } => {
+                self.entities[vi].state = ActorState::Hitstun {
+                    until: t + u64::from(stun.max(1)),
+                };
+                self.entities[vi].stance = Stance::Standing;
+            }
+            Reaction::Knockdown { down_ticks, .. } => {
+                self.entities[vi].state = ActorState::Down {
+                    until: t + u64::from(down_ticks.max(1)),
+                };
+                self.entities[vi].stance = Stance::Down;
+                self.end_combo(vi);
+            }
+            Reaction::Push { .. } => {}
         }
     }
 
@@ -1385,12 +1785,18 @@ impl CombatSim {
                 } else {
                     (hit.reaction, hit.damage)
                 };
+                if self.entities[ai].rage {
+                    damage = scale_damage(damage, self.entities[ai].defense.rage_damage_mult);
+                }
                 if airborne {
                     let weight = self.entities[vi].defense.weight;
                     damage = self.juggle_damage(combo_index, weight, damage);
                 }
                 damage_applied = damage;
                 self.damage(vi, damage);
+                if mv.flags.heat_engager && matches!(outcome, ContactOutcome::Hit { .. }) {
+                    self.start_heat(ai);
+                }
                 if self.entities[vi].state != ActorState::Ko {
                     if was_grab_followthrough {
                         // Held victim: damage lands; the reaction applies on the LAST
@@ -1680,10 +2086,18 @@ impl CombatSim {
             v.state = ActorState::Ko;
             v.current = None;
             v.held = None;
+            v.heat_until = None;
             v.stance = Stance::Down;
             self.trace.push(TraceEvent::Ko {
                 t: self.t,
                 actor: id,
+            });
+        } else if !v.rage && v.defense.rage_threshold_hp > 0 && v.hp <= v.defense.rage_threshold_hp
+        {
+            v.rage = true;
+            self.trace.push(TraceEvent::RageStarted {
+                t: self.t,
+                actor: v.id,
             });
         }
     }
@@ -1865,4 +2279,76 @@ fn scale_damage(damage: u32, mult: Fx) -> u32 {
 fn is_back_hit(attacker: &Entity, victim: &Entity) -> bool {
     let toward_attacker = (attacker.pos - victim.pos).normalize_or_zero();
     toward_attacker != FxVec2::ZERO && victim.facing.dot(toward_attacker) < Fx::ZERO
+}
+
+fn sim_hazards(arena: &ArenaDef) -> Vec<HazardRuntime> {
+    arena
+        .hazards
+        .iter()
+        .map(|_| HazardRuntime::default())
+        .collect()
+}
+
+fn point_in_rect(pos: FxVec2, center: FxVec2, half_extents: FxVec2) -> bool {
+    pos.x >= center.x - half_extents.x
+        && pos.x <= center.x + half_extents.x
+        && pos.y >= center.y - half_extents.y
+        && pos.y <= center.y + half_extents.y
+}
+
+fn projectile_hits(projectile: &Projectile, victim: &Entity) -> bool {
+    if victim.stance == Stance::Down {
+        return false;
+    }
+    if projectile.spec.height == Height::High && victim.stance == Stance::Crouching {
+        return false;
+    }
+    let off = spatial::lane_offsets(projectile.pos, projectile.facing, victim.pos);
+    off.forward >= -projectile.spec.half_len
+        && off.forward <= projectile.spec.half_len
+        && off.lateral >= -projectile.spec.half_width
+        && off.lateral <= projectile.spec.half_width
+}
+
+fn projectile_overlaps(a: &Projectile, b: &Projectile) -> bool {
+    let a_half = a.spec.half_len.max(a.spec.half_width);
+    let b_half = b.spec.half_len.max(b.spec.half_width);
+    let delta = a.pos - b.pos;
+    delta.x.abs() <= a_half + b_half && delta.y.abs() <= a_half + b_half
+}
+
+fn projectile_move(projectile: &Projectile) -> Move {
+    Move {
+        id: projectile.source,
+        name: "projectile".into(),
+        form: crate::data::FormId(0),
+        category: MoveCategory::Projectile,
+        height: projectile.spec.height,
+        blockable: projectile.spec.blockable,
+        tracking: projectile.spec.tracking,
+        timing: crate::data::Timing {
+            startup: 0,
+            active: 1,
+            recovery: 0,
+        },
+        hits: vec![projectile.spec.hit],
+        region: ReachEnvelope {
+            min_range: Fx::ZERO,
+            max_range: projectile.spec.half_len,
+            arc_halfwidth: projectile.spec.half_width,
+            track_halfwidth: projectile.spec.half_width,
+        },
+        motion: crate::data::SelfMotion::default(),
+        properties: vec![],
+        cost: crate::data::MoveCost::default(),
+        gains: vec![],
+        cancels: vec![],
+        startup_cancelable: false,
+        cue: crate::data::CueClass(0),
+        req_stance: None,
+        req_down: false,
+        break_key: None,
+        stance_spec: None,
+        flags: crate::data::MoveFlags::default(),
+    }
 }

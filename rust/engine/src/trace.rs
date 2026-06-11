@@ -78,6 +78,45 @@ pub enum TraceEvent {
     Ko { t: Tick, actor: EntityId },
     /// A KO'd actor was restored by an authored utility move.
     Revived { t: Tick, actor: EntityId, hp: u32 },
+    /// Heat latched on for an authored duration (spec §9.5).
+    HeatStarted {
+        t: Tick,
+        actor: EntityId,
+        until: Tick,
+    },
+    /// Heat timer expired or the actor left the fight.
+    HeatEnded { t: Tick, actor: EntityId },
+    /// Rage latched at the actor's authored HP threshold (spec §9.6).
+    RageStarted { t: Tick, actor: EntityId },
+    /// A missile entered the fight as an independent runtime entity (spec §10.3).
+    ProjectileSpawned {
+        t: Tick,
+        projectile: u32,
+        owner: EntityId,
+        source: MoveId,
+    },
+    /// Opposing missiles overlapped and annihilated.
+    ProjectileClashed { t: Tick, a: u32, b: u32 },
+    /// A missile hit or was defended like any other authored contact.
+    ProjectileContact {
+        t: Tick,
+        projectile: u32,
+        attacker: EntityId,
+        victim: EntityId,
+        source: MoveId,
+        outcome: ContactOutcome,
+        damage: u32,
+        reaction: Option<Reaction>,
+        combo_hits: u32,
+    },
+    /// An authored arena hazard fired.
+    HazardTriggered {
+        t: Tick,
+        hazard: u32,
+        victim: EntityId,
+        damage: u32,
+        reaction: Option<Reaction>,
+    },
     /// The fight ended. `winner` is None on a `max_ticks` cap or a mutual wipe.
     SimEnded { t: Tick, winner: Option<SideId> },
 }

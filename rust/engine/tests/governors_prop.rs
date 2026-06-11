@@ -128,7 +128,8 @@ proptest! {
             .trace()
             .iter()
             .filter_map(|e| match e {
-                TraceEvent::Contact { combo_hits, .. } => Some(*combo_hits),
+                TraceEvent::Contact { combo_hits, .. }
+                | TraceEvent::ProjectileContact { combo_hits, .. } => Some(*combo_hits),
                 _ => None,
             })
             .max()

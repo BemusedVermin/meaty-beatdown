@@ -144,6 +144,13 @@ pub fn event_public_for(
         | TraceEvent::ComboEnded { .. }
         | TraceEvent::Ko { .. }
         | TraceEvent::Revived { .. }
+        | TraceEvent::HeatStarted { .. }
+        | TraceEvent::HeatEnded { .. }
+        | TraceEvent::RageStarted { .. }
+        | TraceEvent::ProjectileSpawned { .. }
+        | TraceEvent::ProjectileClashed { .. }
+        | TraceEvent::ProjectileContact { .. }
+        | TraceEvent::HazardTriggered { .. }
         | TraceEvent::SimEnded { .. } => true,
     }
 }

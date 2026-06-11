@@ -13,6 +13,9 @@ fn the_test_kit_passes_the_audit() {
     report.assert_clean();
     // The governor-7 analytic bound: max stun 40 / step 2 + three latches + slack.
     assert_eq!(report.combo_bound, 25);
+    assert!(report.budget_axes.heat >= 3);
+    assert!(report.budget_axes.projectile >= 1);
+    assert!(report.budget_axes.super_move >= 3);
 }
 
 #[test]

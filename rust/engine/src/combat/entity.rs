@@ -87,6 +87,8 @@ pub struct MoveInstance {
     /// Bitmask of cancel-window indices already prompted (a decline is final for that
     /// window; delay windows are a flagged refinement ⚠️).
     pub cancels_prompted: u32,
+    /// Phase 5 projectile spawn is one-shot per move instance.
+    pub projectile_spawned: bool,
 }
 
 /// Per-victim combo bookkeeping (spec §2.3): decay indices and the extender latches
@@ -158,6 +160,14 @@ pub struct Entity {
     pub ap: u32,
     /// Focus: the earned super gauge (spec §9).
     pub focus: u32,
+    /// Heat timer if the actor is currently transformed (spec §9.5).
+    pub heat_until: Option<Tick>,
+    /// One Heat entry per fight.
+    pub heat_used: bool,
+    /// Rage is a one-way low-HP latch (spec §9.6).
+    pub rage: bool,
+    /// Rage Art is once-only after Rage latches.
+    pub rage_art_used: bool,
     /// Phase 4 solo Burst latch: one Burst per fight per actor.
     pub burst_used: bool,
     /// Combo bookkeeping while this actor is the VICTIM (governors 1–3).

@@ -59,6 +59,9 @@ fn statue_defense(hp: u32) -> DefenseProfile {
         breath_regen_interval: u32::MAX / 2,
         ap_max: 0,
         focus_max: 0,
+        heat_duration: 0,
+        rage_threshold_hp: 0,
+        rage_damage_mult: crate::core::fx::Fx::ONE,
         visibility: MeterVisibility::default(),
     }
 }
@@ -116,6 +119,10 @@ fn projection(obs: &Observation) -> CombatSim {
             breath_regen_acc: 0,
             ap: view.ap.unwrap_or(0),
             focus: view.focus.unwrap_or(0),
+            heat_until: None,
+            heat_used: false,
+            rage: false,
+            rage_art_used: false,
             burst_used: false,
             combo: ComboTracker::default(),
             moves: Vec::new(),

@@ -10,8 +10,9 @@ use engine::core::ids::{EntityId, SideId};
 use engine::core::tick::Tick;
 use engine::data::movedef::{
     CancelGate, CancelWindow, CueClass, GainGate, GainResource, HeightMask, InvulnCover, Move,
-    MoveCategory, MoveCost, MoveFlags, PhaseMotion, PropertyKind, PropertyWindow, ReachEnvelope,
-    ResourceGain, SelfMotion, StanceKind, StanceReq, StanceSpec, ThrowBreakKey, Timing, Tracking,
+    MoveCategory, MoveCost, MoveFlags, PhaseMotion, ProjectileSpec, PropertyKind, PropertyWindow,
+    ReachEnvelope, ResourceGain, SelfMotion, StanceKind, StanceReq, StanceSpec, ThrowBreakKey,
+    Timing, Tracking,
 };
 use engine::data::{
     ArenaDef, ChDefault, DefenseProfile, ExtenderLatches, FocusGains, FormId, Height, HitEvent,
@@ -49,6 +50,13 @@ pub const BURST: MoveId = MoveId(30);
 pub const RESCUE_STRIKE: MoveId = MoveId(31);
 pub const REVIVE: MoveId = MoveId(32);
 pub const WIDE_CLEAVE: MoveId = MoveId(33);
+pub const HEAT_BURST: MoveId = MoveId(40);
+pub const HEAT_ENGAGER: MoveId = MoveId(41);
+pub const HEAT_CLEAVE: MoveId = MoveId(42);
+pub const EX_PALM: MoveId = MoveId(43);
+pub const BEAM_SUPER: MoveId = MoveId(44);
+pub const RAGE_ART: MoveId = MoveId(45);
+pub const FIREBALL: MoveId = MoveId(46);
 
 // ── the cue vocabulary (spec §7.2): shared cues ARE the feints ──
 /// JAB: the quick high flick.
@@ -65,6 +73,10 @@ pub const CUE_STEP: CueClass = CueClass(5);
 pub const CUE_GUARD: CueClass = CueClass(6);
 /// The juggle string + POWER_CRUSH: the flurry.
 pub const CUE_FLURRY: CueClass = CueClass(7);
+/// Heat/super aura shapes: readable escalation, shared by variants.
+pub const CUE_AURA: CueClass = CueClass(8);
+/// Projectile wind-up.
+pub const CUE_PROJECTILE: CueClass = CueClass(9);
 
 /// Exact fraction helper (the engine bans float literals; ratios are exact in Q32.32).
 #[must_use]
@@ -688,6 +700,178 @@ pub fn kit() -> Vec<Move> {
             m.tracking = Tracking::Homing;
             m
         },
+        {
+            let mut m = strike(
+                HEAT_BURST,
+                "heat burst",
+                Height::Mid,
+                Timing {
+                    startup: 1,
+                    active: 1,
+                    recovery: 10,
+                },
+                envelope(0, 180, 160, 160),
+                vec![hit(0, 20, 8, 10, Reaction::Push { dist: fxf(80, 100) })],
+                2,
+                CUE_AURA,
+            );
+            m.flags.heat_burst = true;
+            m
+        },
+        {
+            let mut m = strike(
+                HEAT_ENGAGER,
+                "ember shoulder",
+                Height::Mid,
+                Timing {
+                    startup: 9,
+                    active: 2,
+                    recovery: 16,
+                },
+                envelope(0, 180, 70, 180),
+                vec![hit(0, 40, 8, 12, Reaction::Hitstun { ticks: 18 })],
+                2,
+                CUE_AURA,
+            );
+            m.flags.heat_engager = true;
+            m
+        },
+        {
+            let mut m = strike(
+                HEAT_CLEAVE,
+                "heat cleave",
+                Height::Mid,
+                Timing {
+                    startup: 8,
+                    active: 3,
+                    recovery: 14,
+                },
+                envelope(0, 320, 170, 240),
+                vec![hit(0, 75, 18, 18, Reaction::Hitstun { ticks: 22 })],
+                3,
+                CUE_AURA,
+            );
+            m.flags.heat_only = true;
+            m.tracking = Tracking::TrackL;
+            m
+        },
+        {
+            let mut m = strike(
+                EX_PALM,
+                "ex drifting palm",
+                Height::Mid,
+                Timing {
+                    startup: 7,
+                    active: 2,
+                    recovery: 10,
+                },
+                envelope(0, 220, 80, 220),
+                vec![hit(0, 65, 10, 12, Reaction::Hitstun { ticks: 28 })],
+                2,
+                CUE_FLURRY,
+            );
+            m.cost.focus = 2;
+            m.flags.ex = true;
+            m
+        },
+        {
+            let mut m = strike(
+                BEAM_SUPER,
+                "beam super",
+                Height::Mid,
+                Timing {
+                    startup: 10,
+                    active: 8,
+                    recovery: 40,
+                },
+                envelope(0, 900, 45, 45),
+                vec![hit(
+                    0,
+                    220,
+                    30,
+                    24,
+                    Reaction::Knockdown {
+                        hard: true,
+                        down_ticks: 60,
+                    },
+                )],
+                4,
+                CUE_AURA,
+            );
+            m.cost.focus = 2;
+            m.flags.super_move = true;
+            m
+        },
+        {
+            let mut m = strike(
+                RAGE_ART,
+                "rage art",
+                Height::Mid,
+                Timing {
+                    startup: 6,
+                    active: 2,
+                    recovery: 50,
+                },
+                envelope(0, 240, 80, 220),
+                vec![hit(
+                    0,
+                    180,
+                    20,
+                    24,
+                    Reaction::Knockdown {
+                        hard: true,
+                        down_ticks: 70,
+                    },
+                )],
+                4,
+                CUE_AURA,
+            );
+            m.flags.rage_art = true;
+            m.properties = vec![PropertyWindow {
+                from: 0,
+                to: 5,
+                kind: PropertyKind::Armor {
+                    hits: 1,
+                    dmg_mult: fxf(1, 2),
+                    covers: HeightMask {
+                        high: true,
+                        mid: true,
+                        low: false,
+                    },
+                },
+            }];
+            m
+        },
+        {
+            let mut m = strike(
+                FIREBALL,
+                "fireball",
+                Height::None,
+                Timing {
+                    startup: 6,
+                    active: 1,
+                    recovery: 18,
+                },
+                envelope(0, 0, 0, 0),
+                vec![],
+                2,
+                CUE_PROJECTILE,
+            );
+            m.category = MoveCategory::Utility;
+            m.flags.projectile = Some(ProjectileSpec {
+                spawn_at: 0,
+                speed: fxf(80, 100),
+                lifetime: 20,
+                half_len: fxf(30, 100),
+                half_width: fxf(30, 100),
+                height: Height::Mid,
+                blockable: true,
+                tracking: Tracking::Linear,
+                hit: hit(0, 55, 10, 14, Reaction::Hitstun { ticks: 20 }),
+                friendly_fire: false,
+            });
+            m
+        },
     ];
     moves.sort_by_key(|m| m.id);
     moves
@@ -847,6 +1031,9 @@ pub fn defense() -> DefenseProfile {
         breath_regen_interval: 1,
         ap_max: 24,
         focus_max: 50,
+        heat_duration: 300,
+        rage_threshold_hp: 250,
+        rage_damage_mult: fxf(6, 5),
         visibility: MeterVisibility::default(),
     }
 }
@@ -860,6 +1047,7 @@ fn arena() -> ArenaDef {
             north: WallSpec { splattable: true },
             south: WallSpec { splattable: true },
         },
+        hazards: vec![],
     }
 }
 

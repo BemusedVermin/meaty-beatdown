@@ -46,6 +46,12 @@ pub struct DefenseProfile {
     pub ap_max: u32,
     /// Focus: the earned super gauge (spec §9).
     pub focus_max: u32,
+    /// Heat duration once latched by Heat Burst or a Heat Engager hit.
+    pub heat_duration: u32,
+    /// HP threshold at or below which Rage latches. Zero disables Rage.
+    pub rage_threshold_hp: u32,
+    /// Passive damage scalar while Rage is latched.
+    pub rage_damage_mult: Fx,
     /// Per-meter visibility to enemies (spec §7.1).
     pub visibility: MeterVisibility,
 }

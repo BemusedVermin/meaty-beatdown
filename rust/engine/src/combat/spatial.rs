@@ -136,6 +136,7 @@ mod tests {
                 east: WallSpec { splattable: true },
                 ..Default::default()
             },
+            hazards: vec![],
         };
         let (p, wall) = clamp_to_arena(&arena, FxVec2::new(fx(14), fx(-9)));
         assert_eq!(p, FxVec2::new(fx(10), fx(-6)));

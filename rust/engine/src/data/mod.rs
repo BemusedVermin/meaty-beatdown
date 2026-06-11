@@ -13,15 +13,15 @@ pub mod knowledge;
 pub mod movedef;
 pub mod ruleset;
 
-pub use arena::{ArenaDef, WallSpec, Walls};
+pub use arena::{ArenaDef, HazardSpec, HazardTrigger, WallSpec, Walls};
 pub use defense::{DefenseProfile, MeterVisibility};
 pub use hit::{HitEvent, Reaction};
 pub use ids::{FormId, MoveId};
 pub use knowledge::{KnowledgeBook, KnowledgeTier};
 pub use movedef::{
     CancelGate, CancelWindow, CueClass, GainGate, GainResource, Height, HeightMask, InvulnCover,
-    Move, MoveCategory, MoveCost, MoveFlags, PhaseMotion, PropertyKind, PropertyWindow,
-    ReachEnvelope, ResourceGain, SelfMotion, StanceKind, StanceReq, StanceSpec, ThrowBreakKey,
-    Timing, Tracking,
+    Move, MoveCategory, MoveCost, MoveFlags, PhaseMotion, ProjectileSpec, PropertyKind,
+    PropertyWindow, ReachEnvelope, ResourceGain, SelfMotion, StanceKind, StanceReq, StanceSpec,
+    ThrowBreakKey, Timing, Tracking,
 };
 pub use ruleset::{ChDefault, ExtenderLatches, FocusGains, Ruleset};

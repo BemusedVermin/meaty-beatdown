@@ -4,6 +4,7 @@
 //! DATA, never engine rules.
 
 use crate::core::fx::FxVec2;
+use crate::data::Reaction;
 use serde::{Deserialize, Serialize};
 
 /// Per-segment wall properties (spec §3.7).
@@ -23,10 +24,32 @@ pub struct Walls {
     pub south: WallSpec,
 }
 
+/// How an authored hazard volume repeats after firing (spec §3.7).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HazardTrigger {
+    Once,
+    Cooldown { ticks: u32 },
+    Always,
+}
+
+/// Axis-aligned rectangular hazard volume. Its authored event fires when an actor's
+/// ground position is inside the rectangle.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HazardSpec {
+    pub id: u32,
+    pub center: FxVec2,
+    pub half_extents: FxVec2,
+    pub trigger: HazardTrigger,
+    pub damage: u32,
+    pub reaction: Option<Reaction>,
+    pub affects_allies: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArenaDef {
     /// Rectangle centered on the origin: positions clamp to `[-half_extents, +half_extents]`
     /// on each axis.
     pub half_extents: FxVec2,
     pub walls: Walls,
+    pub hazards: Vec<HazardSpec>,
 }

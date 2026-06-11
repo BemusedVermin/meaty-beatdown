@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 pub enum MoveCategory {
     Strike,
     Throw,
+    Projectile,
     Motion,
     Stance,
     Utility,
@@ -152,6 +153,27 @@ pub enum PropertyKind {
     ChState,
 }
 
+/// A missile emitted by an authored move (spec §10.3). It becomes an independent
+/// runtime entity with its own position, velocity, lifetime, hitbox, and one hit.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectileSpec {
+    /// Active-window tick offset that emits the missile.
+    pub spawn_at: u32,
+    /// Per-tick velocity along the owner's facing at spawn.
+    pub speed: Fx,
+    /// Lifetime in ticks after spawn.
+    pub lifetime: u32,
+    /// Forward half-length around the projectile center.
+    pub half_len: Fx,
+    /// Lateral half-width around the projectile center.
+    pub half_width: Fx,
+    pub height: Height,
+    pub blockable: bool,
+    pub tracking: Tracking,
+    pub hit: HitEvent,
+    pub friendly_fire: bool,
+}
+
 /// A property window: `kind` is live during move ticks `[from, to]` (inclusive, relative
 /// to the move's first startup tick).
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -268,6 +290,20 @@ pub struct MoveFlags {
     pub burst: bool,
     /// UTILITY revival amount. Zero means "not a revive move".
     pub revive_hp: u32,
+    /// Enter Heat on commit. Legal only once per fight.
+    pub heat_burst: bool,
+    /// Legal only while the actor is in Heat. The UI will hide these outside Heat.
+    pub heat_only: bool,
+    /// Enter Heat when this move lands a clean hit.
+    pub heat_engager: bool,
+    /// Enhanced Focus-priced variant; audited as an escalation axis.
+    pub ex: bool,
+    /// Large Focus spend / cut-in move; audited as an escalation axis.
+    pub super_move: bool,
+    /// Legal only while Rage is latched; consumes the Rage Art latch on commit.
+    pub rage_art: bool,
+    /// Emit an independent missile during this move.
+    pub projectile: Option<ProjectileSpec>,
 }
 
 /// Stance requirement for committing a move (spec §2.2 `reqs`). A move with
