@@ -122,11 +122,11 @@ fn the_full_combo_grammar_reads_as_spec_6_2() {
     );
     // Latches all spent exactly once; juggle decay shaved the damage.
     assert_eq!(
-        sim.entity(B).unwrap().hp,
+        sim.debug_entity(B).unwrap().hp,
         1000 - (55 + 36 + 28 + 28 + 27 + 30)
     );
     // Governor 4 ledger: the string cost 22 of 24 AP, refilled on regaining freedom.
-    assert_eq!(sim.entity(A).unwrap().ap, 24);
+    assert_eq!(sim.debug_entity(A).unwrap().ap, 24);
 }
 
 // ── governors, each visibly binding ─────────────────────────────────────────
@@ -169,7 +169,7 @@ fn extender_latches_spend_once_per_combo() {
     // Stop mid-combo (the tracker resets when the combo ends): after the second screw
     // lands at T53, the latch must still read exactly one spend across two screws.
     run(&mut sim, &script, 53);
-    let b = sim.entity(B).unwrap();
+    let b = sim.debug_entity(B).unwrap();
     assert_eq!(b.combo.screw_used, 1, "two screws landed, one latch spent");
     assert_eq!(b.combo.hits, 5);
 }
@@ -432,7 +432,7 @@ fn wake_options_delay_and_back_rise() {
         (73, B, Choice::BackRise),
     ]);
     run(&mut sim, &script, 90);
-    let b = sim.entity(B).unwrap();
+    let b = sim.debug_entity(B).unwrap();
     assert_eq!(b.stance, engine::combat::entity::Stance::Standing);
     // Back-rise displaced B away from A (eastward, B faces west).
     assert!(b.pos.x > fxf(50, 100), "back-rise creates space");
@@ -501,8 +501,8 @@ fn focus_gain_table_pays_the_whiff_punisher() {
     ]);
     run(&mut sim, &script, 70);
     // B: land_hit 2 + whiff_punish 10. A: the comeback drip (3 per 100 damage of 60).
-    assert_eq!(sim.entity(B).unwrap().focus, 12);
-    assert_eq!(sim.entity(A).unwrap().focus, 1);
+    assert_eq!(sim.debug_entity(B).unwrap().focus, 12);
+    assert_eq!(sim.debug_entity(A).unwrap().focus, 1);
 }
 
 #[test]

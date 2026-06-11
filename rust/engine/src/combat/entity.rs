@@ -126,7 +126,7 @@ impl MovePhase {
 }
 
 /// The runtime actor.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Entity {
     pub id: EntityId,
     pub side: SideId,

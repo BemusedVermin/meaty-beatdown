@@ -9,13 +9,13 @@ use engine::core::fx::{Fx, FxVec2, fx};
 use engine::core::ids::{EntityId, SideId};
 use engine::core::tick::Tick;
 use engine::data::movedef::{
-    CancelGate, CancelWindow, GainGate, GainResource, HeightMask, InvulnCover, Move, MoveCategory,
-    MoveCost, PhaseMotion, PropertyKind, PropertyWindow, ReachEnvelope, ResourceGain, SelfMotion,
-    StanceKind, StanceReq, StanceSpec, ThrowBreakKey, Timing, Tracking,
+    CancelGate, CancelWindow, CueClass, GainGate, GainResource, HeightMask, InvulnCover, Move,
+    MoveCategory, MoveCost, PhaseMotion, PropertyKind, PropertyWindow, ReachEnvelope, ResourceGain,
+    SelfMotion, StanceKind, StanceReq, StanceSpec, ThrowBreakKey, Timing, Tracking,
 };
 use engine::data::{
     ArenaDef, ChDefault, DefenseProfile, ExtenderLatches, FocusGains, FormId, Height, HitEvent,
-    MoveId, Reaction, Ruleset, WallSpec, Walls,
+    KnowledgeBook, MeterVisibility, MoveId, Reaction, Ruleset, WallSpec, Walls,
 };
 use std::collections::BTreeMap;
 
@@ -46,6 +46,22 @@ pub const BOUND_SLAM: MoveId = MoveId(23);
 pub const ENDER: MoveId = MoveId(24);
 pub const WAKE_REVERSAL: MoveId = MoveId(26);
 
+// ── the cue vocabulary (spec §7.2): shared cues ARE the feints ──
+/// JAB: the quick high flick.
+pub const CUE_QUICK: CueClass = CueClass(1);
+/// MID_POKE + SWEEP: the §14 "low coil" — thrust feint or sweep? A guess.
+pub const CUE_LOW_COIL: CueClass = CueClass(2);
+/// THROW_L + THROW_R + DASH_IN: the lunging shape — grab (which break?) or approach?
+pub const CUE_LUNGE: CueClass = CueClass(3);
+/// LAUNCHER + WS_UPPERCUT + WAKE_REVERSAL: the rising shapes.
+pub const CUE_RISING: CueClass = CueClass(4);
+/// SIDESTEP_L + BACKDASH: weight shifts.
+pub const CUE_STEP: CueClass = CueClass(5);
+/// Guards, crouch, and the parry (a sabaki LOOKS like guarding — the built-in lie).
+pub const CUE_GUARD: CueClass = CueClass(6);
+/// The juggle string + POWER_CRUSH: the flurry.
+pub const CUE_FLURRY: CueClass = CueClass(7);
+
 /// Exact fraction helper (the engine bans float literals; ratios are exact in Q32.32).
 #[must_use]
 pub fn fxf(num: i32, den: i32) -> Fx {
@@ -61,6 +77,10 @@ fn envelope(min_cm: i32, max_cm: i32, arc_cm: i32, track_cm: i32) -> ReachEnvelo
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "an authoring shorthand, not an API"
+)]
 fn strike(
     id: MoveId,
     name: &str,
@@ -69,6 +89,7 @@ fn strike(
     region: ReachEnvelope,
     hits: Vec<HitEvent>,
     ap: u32,
+    cue: CueClass,
 ) -> Move {
     Move {
         id,
@@ -91,6 +112,7 @@ fn strike(
         gains: vec![],
         cancels: vec![],
         startup_cancelable: false,
+        cue,
         req_stance: None,
         req_down: false,
         break_key: None,
@@ -154,6 +176,7 @@ pub fn kit() -> Vec<Move> {
                 envelope(0, 150, 50, 150),
                 vec![hit(0, 30, 12, 12, Reaction::Hitstun { ticks: 16 })],
                 1,
+                CUE_QUICK,
             );
             m.cancels = vec![
                 chain(7, 12, CancelGate::OnHit, MID_POKE, 2, 0),
@@ -174,6 +197,7 @@ pub fn kit() -> Vec<Move> {
                 envelope(0, 250, 60, 180),
                 vec![hit(0, 60, 10, 14, Reaction::Hitstun { ticks: 20 })],
                 2,
+                CUE_LOW_COIL,
             );
             m.hits[0].ch_reaction = Some(Reaction::Knockdown {
                 hard: true,
@@ -202,6 +226,7 @@ pub fn kit() -> Vec<Move> {
                 },
             )],
             2,
+            CUE_LOW_COIL,
         ),
         throw(THROW_L, "shoulder toss", ThrowBreakKey::L),
         throw(THROW_R, "hip toss", ThrowBreakKey::R),
@@ -315,6 +340,7 @@ pub fn kit() -> Vec<Move> {
                 envelope(0, 0, 0, 0),
                 vec![],
                 1,
+                CUE_GUARD,
             );
             m.category = MoveCategory::Utility;
             m.properties = vec![PropertyWindow {
@@ -350,6 +376,7 @@ pub fn kit() -> Vec<Move> {
                 envelope(0, 180, 60, 180),
                 vec![hit(0, 45, 8, 12, Reaction::Hitstun { ticks: 18 })],
                 2,
+                CUE_RISING,
             );
             m.req_stance = Some(StanceReq::Crouching);
             m
@@ -367,6 +394,7 @@ pub fn kit() -> Vec<Move> {
                 envelope(0, 200, 70, 200),
                 vec![hit(0, 70, 12, 16, Reaction::Hitstun { ticks: 20 })],
                 3,
+                CUE_FLURRY,
             );
             m.properties = vec![PropertyWindow {
                 from: 2,
@@ -407,6 +435,7 @@ pub fn kit() -> Vec<Move> {
                     },
                 )],
                 3,
+                CUE_RISING,
             );
             m.cancels = vec![chain(16, 24, CancelGate::OnHit, JUGGLE_PALM, 2, 0)];
             // Juggle moves advance: the string chases its own carry (🔬 Tekken).
@@ -429,6 +458,7 @@ pub fn kit() -> Vec<Move> {
                 envelope(0, 200, 70, 200),
                 vec![hit(0, 40, 6, 10, Reaction::Hitstun { ticks: 30 })],
                 1,
+                CUE_FLURRY,
             );
             m.cancels = vec![
                 chain(9, 14, CancelGate::OnHit, JUGGLE_PALM, 3, 0),
@@ -464,6 +494,7 @@ pub fn kit() -> Vec<Move> {
                     },
                 )],
                 2,
+                CUE_FLURRY,
             );
             m.cancels = vec![
                 chain(10, 16, CancelGate::OnHit, JUGGLE_PALM, 2, 0),
@@ -488,6 +519,7 @@ pub fn kit() -> Vec<Move> {
                 envelope(0, 200, 70, 200),
                 vec![hit(0, 45, 6, 10, Reaction::Bound { stun: 32 })],
                 3,
+                CUE_FLURRY,
             );
             m.cancels = vec![
                 chain(11, 17, CancelGate::OnHit, JUGGLE_PALM, 2, 0),
@@ -521,6 +553,7 @@ pub fn kit() -> Vec<Move> {
                     },
                 )],
                 2,
+                CUE_FLURRY,
             );
             m.motion.startup = PhaseMotion {
                 forward: fxf(60, 100),
@@ -541,6 +574,7 @@ pub fn kit() -> Vec<Move> {
                 envelope(0, 180, 70, 200),
                 vec![hit(0, 50, 8, 12, Reaction::Hitstun { ticks: 20 })],
                 2,
+                CUE_RISING,
             );
             m.req_down = true;
             m.properties = vec![PropertyWindow {
@@ -595,6 +629,7 @@ fn throw(id: MoveId, name: &str, key: ThrowBreakKey) -> Move {
         gains: vec![],
         cancels: vec![],
         startup_cancelable: false,
+        cue: CUE_LUNGE,
         req_stance: None,
         req_down: false,
         break_key: Some(key),
@@ -624,6 +659,9 @@ fn motion_move(id: MoveId, name: &str, timing: Timing, motion: SelfMotion) -> Mo
         gains: vec![],
         cancels: vec![],
         startup_cancelable: false,
+        // The dash shares the grab's lunging shape (the approach ambiguity); steps and
+        // backdashes read as weight shifts.
+        cue: if id == DASH_IN { CUE_LUNGE } else { CUE_STEP },
         req_stance: None,
         req_down: false,
         break_key: None,
@@ -649,6 +687,7 @@ fn stance_move(id: MoveId, name: &str, timing: Timing, spec: StanceSpec) -> Move
         gains: vec![],
         cancels: vec![],
         startup_cancelable: false,
+        cue: CUE_GUARD,
         req_stance: None,
         req_down: false,
         break_key: None,
@@ -703,6 +742,7 @@ pub fn defense() -> DefenseProfile {
         breath_regen_interval: 1,
         ap_max: 24,
         focus_max: 50,
+        visibility: MeterVisibility::default(),
     }
 }
 
@@ -738,8 +778,24 @@ pub fn duel_with(rs: Ruleset, ax_cm: i32, bx_cm: i32) -> CombatSim {
     duel_full(rs, arena(), ax_cm, bx_cm)
 }
 
+/// As `duel_at`, plus per-side knowledge books (the fog-gradient tests, spec §7.3).
+#[must_use]
+pub fn duel_knowing(
+    ax_cm: i32,
+    bx_cm: i32,
+    knowledge: BTreeMap<SideId, KnowledgeBook>,
+) -> CombatSim {
+    let mut config = duel_config(ruleset(), arena(), ax_cm, bx_cm);
+    config.knowledge = knowledge;
+    CombatSim::new(config)
+}
+
 fn duel_full(rs: Ruleset, sim_arena: ArenaDef, ax_cm: i32, bx_cm: i32) -> CombatSim {
-    CombatSim::new(SimConfig {
+    CombatSim::new(duel_config(rs, sim_arena, ax_cm, bx_cm))
+}
+
+fn duel_config(rs: Ruleset, sim_arena: ArenaDef, ax_cm: i32, bx_cm: i32) -> SimConfig {
+    SimConfig {
         arena: sim_arena,
         ruleset: rs,
         entities: vec![
@@ -763,7 +819,8 @@ fn duel_full(rs: Ruleset, sim_arena: ArenaDef, ax_cm: i32, bx_cm: i32) -> Combat
             },
         ],
         max_ticks: 600,
-    })
+        knowledge: BTreeMap::new(),
+    }
 }
 
 /// A 1v1 centered on the origin, `gap_cm` apart.

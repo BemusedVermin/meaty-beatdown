@@ -40,9 +40,9 @@ fn jab_hits_and_derives_advantage() {
         contacts(&sim),
         vec![(6, 1, 2, ContactOutcome::Hit { counter: false })]
     );
-    assert_eq!(sim.entity(B).unwrap().hp, 970);
+    assert_eq!(sim.debug_entity(B).unwrap().hp, 970);
     // I-1, derived not stored: attacker free at T16 (6+2+8), victim stunned until T22.
-    assert_eq!(sim.entity(B).unwrap().state, ActorState::Free);
+    assert_eq!(sim.debug_entity(B).unwrap().state, ActorState::Free);
 }
 
 #[test]
@@ -55,7 +55,7 @@ fn high_whiffs_entirely_over_crouch() {
     run(&mut sim, &script, 30);
     // Not blocked — MISSED. No contact of any kind; the attacker ate full recovery.
     assert!(contacts(&sim).is_empty());
-    assert_eq!(sim.entity(B).unwrap().hp, 1000);
+    assert_eq!(sim.debug_entity(B).unwrap().hp, 1000);
 }
 
 #[test]
@@ -70,7 +70,7 @@ fn mid_hits_the_croucher() {
         contacts(&sim),
         vec![(12, 1, 2, ContactOutcome::Hit { counter: false })]
     );
-    assert_eq!(sim.entity(B).unwrap().hp, 940);
+    assert_eq!(sim.debug_entity(B).unwrap().hp, 940);
 }
 
 // ── guard, chip, guard break (spec §5.3) ────────────────────────────────────
@@ -84,7 +84,7 @@ fn standing_guard_blocks_high_and_chips_guard_not_hp() {
     ]);
     run(&mut sim, &script, 30);
     assert_eq!(contacts(&sim), vec![(6, 1, 2, ContactOutcome::Blocked)]);
-    let b = sim.entity(B).unwrap();
+    let b = sim.debug_entity(B).unwrap();
     assert_eq!(b.hp, 1000, "chip never touches HP (spec v2)");
     assert_eq!(b.guard, 50 - 12);
 }
@@ -102,7 +102,7 @@ fn low_goes_under_standing_guard() {
         vec![(18, 1, 2, ContactOutcome::Hit { counter: false })]
     );
     // Hard knockdown, then auto-rise.
-    let b = sim.entity(B).unwrap();
+    let b = sim.debug_entity(B).unwrap();
     assert_eq!(b.hp, 950);
 }
 
@@ -115,7 +115,7 @@ fn crouch_guard_blocks_the_low() {
     ]);
     run(&mut sim, &script, 50);
     assert_eq!(contacts(&sim), vec![(18, 1, 2, ContactOutcome::Blocked)]);
-    assert_eq!(sim.entity(B).unwrap().guard, 50 - 8);
+    assert_eq!(sim.debug_entity(B).unwrap().guard, 50 - 8);
 }
 
 #[test]
@@ -144,7 +144,7 @@ fn guard_break_is_the_anti_turtle_terminus() {
     // The sixth poke meets the broken guard (T132 break, stun until T172): clean hit.
     let last = contacts(&sim).last().copied().unwrap();
     assert_eq!(last, (162, 1, 2, ContactOutcome::Hit { counter: false }));
-    assert_eq!(sim.entity(B).unwrap().hp, 940);
+    assert_eq!(sim.debug_entity(B).unwrap().hp, 940);
 }
 
 // ── the §14 beats: sidestep-whiff into CH whiff-punish ──────────────────────
@@ -167,7 +167,7 @@ fn sidestep_whiffs_the_linear_mid_and_ch_punishes() {
         vec![(25, 2, 1, ContactOutcome::Hit { counter: true })]
     );
     assert_eq!(
-        sim.entity(A).unwrap().hp,
+        sim.debug_entity(A).unwrap().hp,
         940,
         "CH override keeps authored damage"
     );
@@ -188,7 +188,7 @@ fn frame_trap_counter_hit_uses_ruleset_default() {
         contacts(&sim),
         vec![(8, 1, 2, ContactOutcome::Hit { counter: true })]
     );
-    assert_eq!(sim.entity(B).unwrap().hp, 1000 - 37);
+    assert_eq!(sim.debug_entity(B).unwrap().hp, 1000 - 37);
     // B's move was interrupted: its poke never lands.
     assert_eq!(contacts(&sim).len(), 1);
 }
@@ -217,16 +217,16 @@ fn throw_breaks_on_the_correct_directional_read() {
         }
     )));
     assert_eq!(
-        sim.entity(B).unwrap().hp,
+        sim.debug_entity(B).unwrap().hp,
         1000,
         "teched throws deal nothing"
     );
     // Both reset with separation: the gap grew past the throw's reach.
     let gap = sim
-        .entity(A)
+        .debug_entity(A)
         .unwrap()
         .pos
-        .distance(sim.entity(B).unwrap().pos);
+        .distance(sim.debug_entity(B).unwrap().pos);
     assert!(gap > fxf(90, 100));
 }
 
@@ -259,7 +259,7 @@ fn wrong_break_guess_eats_the_throw() {
             (18, 1, 2, ContactOutcome::Hit { counter: false })
         ]
     );
-    assert_eq!(sim.entity(B).unwrap().hp, 930);
+    assert_eq!(sim.debug_entity(B).unwrap().hp, 930);
 }
 
 #[test]
@@ -275,7 +275,7 @@ fn declining_the_break_also_eats_the_throw() {
             ..
         }
     )));
-    assert_eq!(sim.entity(B).unwrap().hp, 930);
+    assert_eq!(sim.debug_entity(B).unwrap().hp, 930);
 }
 
 #[test]
@@ -292,7 +292,7 @@ fn throws_whiff_on_crouchers() {
             .iter()
             .any(|e| matches!(e, TraceEvent::ThrowResolved { .. }))
     );
-    assert_eq!(sim.entity(B).unwrap().hp, 1000);
+    assert_eq!(sim.debug_entity(B).unwrap().hp, 1000);
 }
 
 #[test]
@@ -330,7 +330,7 @@ fn guard_point_freezes_the_attacker() {
     assert!(matches!(cs[0], (6, 1, 2, ContactOutcome::Parried { .. })));
     // The parrier recovers fast (T12) and punishes the authored freeze (until T26).
     assert_eq!(cs[1], (24, 2, 1, ContactOutcome::Hit { counter: false }));
-    assert_eq!(sim.entity(A).unwrap().hp, 940);
+    assert_eq!(sim.debug_entity(A).unwrap().hp, 940);
 }
 
 #[test]
@@ -345,7 +345,7 @@ fn armor_absorbs_scaled_and_the_move_continues() {
     let cs = contacts(&sim);
     // Jab meets the armor window: absorbed at half damage, no stun...
     assert_eq!(cs[0], (8, 1, 2, ContactOutcome::Armored));
-    assert_eq!(sim.entity(B).unwrap().hp, 1000 - 15);
+    assert_eq!(sim.debug_entity(B).unwrap().hp, 1000 - 15);
     // ...and the crush plows on through A's recovery: a counter-hit.
     assert_eq!(cs[1], (14, 2, 1, ContactOutcome::Hit { counter: true }));
 }
@@ -359,7 +359,7 @@ fn backdash_iframes_pass_the_strike_through() {
     ]);
     run(&mut sim, &script, 30);
     assert_eq!(contacts(&sim), vec![(6, 1, 2, ContactOutcome::Whiff)]);
-    assert_eq!(sim.entity(B).unwrap().hp, 1000);
+    assert_eq!(sim.debug_entity(B).unwrap().hp, 1000);
 }
 
 // ── stances as moves (spec §5.2–5.3) ────────────────────────────────────────
@@ -377,7 +377,7 @@ fn while_crouching_moves_commit_from_the_held_stance() {
         contacts(&sim),
         vec![(39, 2, 1, ContactOutcome::Hit { counter: false })]
     );
-    assert_eq!(sim.entity(A).unwrap().hp, 955);
+    assert_eq!(sim.debug_entity(A).unwrap().hp, 955);
 }
 
 #[test]
@@ -392,10 +392,10 @@ fn release_pays_the_authored_recovery() {
     let status = run(&mut sim, &script, 32);
     assert_eq!(status, SimStatus::AwaitingDecisions);
     // Released at T32: locked through the stance's release recovery (4 ticks, free T36).
-    assert_eq!(sim.entity(B).unwrap().state, ActorState::Acting);
+    assert_eq!(sim.debug_entity(B).unwrap().state, ActorState::Acting);
     run(&mut sim, &script, 45);
-    assert_eq!(sim.entity(B).unwrap().state, ActorState::Free);
-    assert_eq!(sim.entity(B).unwrap().stance, Stance::Standing);
+    assert_eq!(sim.debug_entity(B).unwrap().state, ActorState::Free);
+    assert_eq!(sim.debug_entity(B).unwrap().stance, Stance::Standing);
 }
 
 // ── outcome (spec §8.6, the 1v1 special case) ───────────────────────────────

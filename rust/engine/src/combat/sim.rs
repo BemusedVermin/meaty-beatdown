@@ -19,8 +19,8 @@
 //! and Focus pricing at commit/cancel time (governors 4-5), and the gravity floor at
 //! juggle sustain (governor 7). Governor 6 (no positive cancel cycles) is the audit's.
 //!
-//! TODO(Phase 3): true state goes module-private behind the Observation API (C-FOG);
-//! until then `entity()` exposes full state for tests.
+//! Phase 3 raises the fog boundary (C-FOG): `observe(side)` is the only gameplay read;
+//! `debug_entity`/`trace` are replay & test surfaces, review-banned in the app.
 
 use crate::core::fx::{Fx, FxVec2};
 use crate::core::ids::{EntityId, SideId};
@@ -29,10 +29,11 @@ use crate::data::movedef::{
     CancelGate, CancelWindow, GainGate, GainResource, Move, MoveCategory, PropertyKind, StanceKind,
     StanceReq,
 };
-use crate::data::{ArenaDef, DefenseProfile, MoveId, Reaction, Ruleset};
+use crate::data::{ArenaDef, DefenseProfile, KnowledgeBook, MoveId, Reaction, Ruleset};
 use crate::trace::{ThrowResolution, TraceEvent};
 
 use super::entity::{ActorState, ComboTracker, Entity, MoveInstance, MovePhase, Stance};
+use super::observe::{self, Observation};
 use super::resolve::{self, ContactOutcome};
 use super::schedule::{Choice, CommitBatch, CommitError, DecisionKind, PendingDecision};
 use super::spatial;
@@ -58,6 +59,9 @@ pub struct SimConfig {
     /// Hard termination cap (fsm.md): with no rounds and no timer, a bout must still
     /// provably end.
     pub max_ticks: u64,
+    /// Each side's matchup knowledge (spec §7.3), read-only for the fight. Missing
+    /// sides know nothing (T0 across the board).
+    pub knowledge: std::collections::BTreeMap<SideId, KnowledgeBook>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -94,6 +98,7 @@ pub struct CombatSim {
     arena: ArenaDef,
     ruleset: Ruleset,
     max_ticks: u64,
+    knowledge: std::collections::BTreeMap<SideId, KnowledgeBook>,
     stage: Stage,
     batch: Option<CommitBatch>,
     grabs: Vec<PendingGrab>,
@@ -142,6 +147,7 @@ impl CombatSim {
             arena: config.arena,
             ruleset: config.ruleset,
             max_ticks: config.max_ticks,
+            knowledge: config.knowledge,
             stage: Stage::TickStart,
             batch: None,
             grabs: Vec::new(),
@@ -152,6 +158,31 @@ impl CombatSim {
             sim.auto_face(i);
         }
         sim
+    }
+
+    /// Build a PROJECTION sim from already-shaped entities at an absolute tick — the
+    /// forecast's engine-on-Observation path (spec §7.4; tech-plan §3). Same advance
+    /// loop, same rules: the forecast can never drift from the fight.
+    pub(crate) fn projection(
+        t: Tick,
+        mut entities: Vec<Entity>,
+        arena: ArenaDef,
+        ruleset: Ruleset,
+    ) -> Self {
+        entities.sort_by_key(|e| e.id);
+        Self {
+            t,
+            entities,
+            arena,
+            ruleset,
+            max_ticks: t.0 + 10_000,
+            knowledge: std::collections::BTreeMap::new(),
+            stage: Stage::TickStart,
+            batch: None,
+            grabs: Vec::new(),
+            over: None,
+            trace: Vec::new(),
+        }
     }
 
     // -- the public pump ------------------------------------------------------
@@ -239,13 +270,53 @@ impl CombatSim {
         self.t
     }
 
-    /// Full actor state — test surface only. TODO(Phase 3): goes module-private behind
-    /// `observe()`; the UI and AI never see this.
+    /// THE fog boundary (spec §7.1, C-FOG): everything a side may know right now.
+    /// The UI and every AI agent consume this and nothing else.
     #[must_use]
-    pub fn entity(&self, id: EntityId) -> Option<&Entity> {
+    pub fn observe(&self, side: SideId) -> Observation {
+        let book = self.knowledge.get(&side);
+        let tier_of = |id: MoveId| book.map(|b| b.tier(id)).unwrap_or_default();
+        let allies: Vec<Entity> = self
+            .entities
+            .iter()
+            .filter(|e| e.side == side)
+            .cloned()
+            .collect();
+        let enemies: Vec<observe::EnemyView> = self
+            .entities
+            .iter()
+            .filter(|e| e.side != side)
+            .map(|e| observe::project_enemy(e, self.t, tier_of))
+            .collect();
+        let side_of = |id: EntityId| self.entities.iter().find(|e| e.id == id).map(|e| e.side);
+        let events: Vec<TraceEvent> = self
+            .trace
+            .iter()
+            .filter(|ev| observe::event_public_for(ev, side, side_of))
+            .cloned()
+            .collect();
+        Observation {
+            t: self.t,
+            side,
+            allies,
+            enemies,
+            events,
+            arena: self.arena.clone(),
+            ruleset: self.ruleset.clone(),
+        }
+    }
+
+    /// TRUE state — debug/test surface ONLY. Everything gameplay-facing goes through
+    /// `observe()`; the app may never call this (driver review rule, tech-plan §4).
+    #[doc(hidden)]
+    #[must_use]
+    pub fn debug_entity(&self, id: EntityId) -> Option<&Entity> {
         self.entities.iter().find(|e| e.id == id)
     }
 
+    /// The full trace — the replay/golden-vector contract (C-DET). Contains BOTH sides'
+    /// commitments: a replay artifact and debug log, not a gameplay read (the fogged
+    /// event view lives on `Observation::events`).
     #[must_use]
     pub fn trace(&self) -> &[TraceEvent] {
         &self.trace
@@ -381,7 +452,7 @@ impl CombatSim {
 
     fn auto_face_forced(&mut self, i: usize) {
         let target = self.entities[i].target;
-        let Some(target_pos) = self.entity(target).map(|e| e.pos) else {
+        let Some(target_pos) = self.entities.iter().find(|e| e.id == target).map(|e| e.pos) else {
             return;
         };
         let dir = (target_pos - self.entities[i].pos).normalize_or_zero();
@@ -506,7 +577,7 @@ impl CombatSim {
         if batch.committed.contains_key(&actor) {
             return Err(CommitError::AlreadyCommitted { actor });
         }
-        let entity = self.entity(actor).expect("pending actor exists");
+        let entity = self.debug_entity(actor).expect("pending actor exists");
         let i = self.index_of(actor);
         match (pending.kind, choice) {
             (DecisionKind::Ready, Choice::Wait { .. }) => Ok(()),

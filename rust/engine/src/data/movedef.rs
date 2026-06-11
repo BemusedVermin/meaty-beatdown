@@ -226,6 +226,13 @@ pub struct CancelWindow {
     pub focus_cost: u32,
 }
 
+/// An authored cue class (spec §7.2): the observable wind-up — the fog's currency.
+/// Cues are COARSE by design: a Form's moves share a small cue vocabulary, and a move
+/// sharing a cue with a scarier sibling IS a feint (priced by the budget at Phase 5).
+/// Rule R-7: every move has one.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct CueClass(pub u32);
+
 /// Throw break key (spec §5.4): the defender's 2-way directional read. A THROW with
 /// `break_key: None` is an unbreakable command grab (pays heavily on the budget).
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -290,6 +297,10 @@ pub struct Move {
     /// are authored, costed feint tech — the audit rejects startup-covering windows
     /// unless this is set.
     pub startup_cancelable: bool,
+
+    // ── information (spec §7.2) ──────────────────────────────────────────
+    /// What enemies SEE while this move is in flight. Shared cues are feints.
+    pub cue: CueClass,
 
     // ── interaction ──────────────────────────────────────────────────────
     /// Required stance to commit (None = any grounded stance).

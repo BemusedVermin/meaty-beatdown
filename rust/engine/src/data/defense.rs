@@ -5,6 +5,29 @@
 use crate::core::fx::Fx;
 use serde::{Deserialize, Serialize};
 
+/// What enemies may observe of this actor's meters (spec §7.1). Locked decision: only
+/// HP at first; every flag tunable per compiled fighter. ✅
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MeterVisibility {
+    pub hp: bool,
+    pub guard: bool,
+    pub breath: bool,
+    pub ap: bool,
+    pub focus: bool,
+}
+
+impl Default for MeterVisibility {
+    fn default() -> Self {
+        Self {
+            hp: true,
+            guard: false,
+            breath: false,
+            ap: false,
+            focus: false,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DefenseProfile {
     pub hp_max: u32,
@@ -23,4 +46,6 @@ pub struct DefenseProfile {
     pub ap_max: u32,
     /// Focus: the earned super gauge (spec §9).
     pub focus_max: u32,
+    /// Per-meter visibility to enemies (spec §7.1).
+    pub visibility: MeterVisibility,
 }

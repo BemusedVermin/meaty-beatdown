@@ -22,7 +22,7 @@ fn random_choice(
     kind: DecisionKind,
 ) -> Vec<Choice> {
     let movelist = sim
-        .entity(actor)
+        .debug_entity(actor)
         .map(|e| e.moves.clone())
         .unwrap_or_default();
     let mut candidates: Vec<Choice> = Vec::new();
@@ -137,7 +137,7 @@ proptest! {
     fn meters_bounded_and_fights_end(seed in any::<u64>()) {
         let sim = fuzz_fight(seed);
         for id in [A, B] {
-            let e = sim.entity(id).unwrap();
+            let e = sim.debug_entity(id).unwrap();
             prop_assert!(e.hp <= e.defense.hp_max);
             prop_assert!(e.guard <= e.defense.guard_max);
             prop_assert!(e.breath <= e.defense.breath_max);
