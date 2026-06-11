@@ -13,17 +13,26 @@
 //! the `Committed` trace events ARE the decision log, and replaying them byte-identically
 //! reproduces the trace (C-DET).
 //!
+//! Phase 2 adds the combo system (spec §6) and the meters (spec §9). The governors live
+//! where they bind: hitstun decay and juggle damage decay in the hit application
+//! (governors 1-2), the extender latches in the reaction application (governor 3), AP
+//! and Focus pricing at commit/cancel time (governors 4-5), and the gravity floor at
+//! juggle sustain (governor 7). Governor 6 (no positive cancel cycles) is the audit's.
+//!
 //! TODO(Phase 3): true state goes module-private behind the Observation API (C-FOG);
 //! until then `entity()` exposes full state for tests.
 
 use crate::core::fx::{Fx, FxVec2};
 use crate::core::ids::{EntityId, SideId};
 use crate::core::tick::Tick;
-use crate::data::movedef::{Move, MoveCategory, PropertyKind, StanceKind, StanceReq};
+use crate::data::movedef::{
+    CancelGate, CancelWindow, GainGate, GainResource, Move, MoveCategory, PropertyKind, StanceKind,
+    StanceReq,
+};
 use crate::data::{ArenaDef, DefenseProfile, MoveId, Reaction, Ruleset};
 use crate::trace::{ThrowResolution, TraceEvent};
 
-use super::entity::{ActorState, Entity, MoveInstance, MovePhase, Stance};
+use super::entity::{ActorState, ComboTracker, Entity, MoveInstance, MovePhase, Stance};
 use super::resolve::{self, ContactOutcome};
 use super::schedule::{Choice, CommitBatch, CommitError, DecisionKind, PendingDecision};
 use super::spatial;
@@ -110,9 +119,15 @@ impl CombatSim {
                 current: None,
                 held: None,
                 reevaluate_at: Tick::ZERO,
+                height_off: Fx::ZERO,
                 hp: e.defense.hp_max,
                 guard: e.defense.guard_max,
                 guard_regen_acc: 0,
+                breath: e.defense.breath_max,
+                breath_regen_acc: 0,
+                ap: e.defense.ap_max,
+                focus: 0,
+                combo: ComboTracker::default(),
                 moves: e.moves,
                 defense: e.defense,
             })
@@ -139,7 +154,7 @@ impl CombatSim {
         sim
     }
 
-    // ── the public pump ──────────────────────────────────────────────────────
+    // -- the public pump ------------------------------------------------------
 
     /// Run until a decision is needed or the fight is over.
     pub fn advance(&mut self) -> SimStatus {
@@ -236,7 +251,7 @@ impl CombatSim {
         &self.trace
     }
 
-    // ── stage: tick start ────────────────────────────────────────────────────
+    // -- stage: tick start ----------------------------------------------------
 
     fn upkeep_start(&mut self) {
         let t = self.t;
@@ -265,45 +280,89 @@ impl CombatSim {
                     };
                     e.reevaluate_at = t + u64::from(self.ruleset.block_reevaluate_every);
                 } else if MovePhase::at(timing, elapsed) == MovePhase::Done {
-                    let e = &mut self.entities[i];
-                    // A thrown victim still held at move end is released standing.
-                    if let Some(victim) = e.current.and_then(|c| c.grabbed_victim) {
-                        e.current = None;
-                        self.release_grabbed(victim);
-                    } else {
-                        e.current = None;
+                    let victim = self.entities[i].current.and_then(|c| c.grabbed_victim);
+                    self.entities[i].current = None;
+                    if self.entities[i].held.is_none() {
+                        self.entities[i].stance = Stance::Standing;
                     }
-                    let e = &mut self.entities[i];
-                    e.state = ActorState::Free;
-                    e.ready_tick = t;
-                    if e.held.is_none() {
-                        e.stance = Stance::Standing;
+                    self.set_free(i, t);
+                    if let Some(v) = victim {
+                        self.release_grabbed(v);
                     }
                 }
             }
-            // Stun / down expiries.
-            let e = &mut self.entities[i];
-            match e.state {
+            // Stun / juggle / down expiries.
+            match self.entities[i].state {
                 ActorState::Hitstun { until } | ActorState::GuardBroken { until } if until == t => {
-                    e.state = ActorState::Free;
-                    e.ready_tick = t;
-                    e.stance = Stance::Standing;
+                    self.entities[i].stance = Stance::Standing;
+                    self.set_free(i, t);
+                    self.end_combo(i);
+                }
+                ActorState::Crumple { until } if until == t => {
+                    // Nobody picked them up: collapse.
+                    self.floor(i, "collapse");
+                }
+                ActorState::Airborne { stun_until } if stun_until == t => {
+                    self.trace.push(TraceEvent::Landed {
+                        t,
+                        victim: self.entities[i].id,
+                    });
+                    self.floor(i, "landed");
+                }
+                ActorState::WallSplat { until } if until == t => {
+                    self.trace.push(TraceEvent::Landed {
+                        t,
+                        victim: self.entities[i].id,
+                    });
+                    self.floor(i, "splat fell");
                 }
                 ActorState::Blockstun { until } if until == t => {
                     // Still holding guard; an event touched you -> re-decide now (§5.3).
-                    e.state = ActorState::HoldingStance;
-                    e.reevaluate_at = t;
-                }
-                ActorState::Down { until } if until == t => {
-                    e.stance = Stance::Standing;
-                    e.state = ActorState::Free;
-                    e.ready_tick = t;
+                    self.entities[i].state = ActorState::HoldingStance;
+                    self.entities[i].reevaluate_at = t;
                 }
                 _ => {}
             }
         }
         for i in 0..self.entities.len() {
             self.auto_face(i);
+        }
+    }
+
+    /// Regaining freedom refills AP to max (spec §9.4): your turn's tempo budget resets
+    /// when the string is over.
+    fn set_free(&mut self, i: usize, ready: Tick) {
+        let e = &mut self.entities[i];
+        e.state = ActorState::Free;
+        e.ready_tick = ready;
+        e.ap = e.defense.ap_max;
+    }
+
+    /// The victim hits the ground: knockdown into the wake-up flow, combo over.
+    fn floor(&mut self, i: usize, _why: &str) {
+        let t = self.t;
+        let e = &mut self.entities[i];
+        e.state = ActorState::Down {
+            until: t + u64::from(self.ruleset.landing_down_ticks.max(1)),
+        };
+        e.stance = Stance::Down;
+        e.height_off = Fx::ZERO;
+        e.current = None;
+        e.held = None;
+        self.end_combo(i);
+    }
+
+    /// Close out a combo on this victim, if one was running.
+    fn end_combo(&mut self, i: usize) {
+        let hits = self.entities[i].combo.hits;
+        if hits > 0 {
+            let victim = self.entities[i].id;
+            self.trace.push(TraceEvent::ComboEnded {
+                t: self.t,
+                victim,
+                hits,
+            });
+            self.entities[i].combo = ComboTracker::default();
         }
     }
 
@@ -317,6 +376,10 @@ impl CombatSim {
         ) {
             return;
         }
+        self.auto_face_forced(i);
+    }
+
+    fn auto_face_forced(&mut self, i: usize) {
         let target = self.entities[i].target;
         let Some(target_pos) = self.entity(target).map(|e| e.pos) else {
             return;
@@ -327,27 +390,89 @@ impl CombatSim {
         }
     }
 
-    /// Collect this tick's Ready / StanceReevaluate prompts. Returns true if a batch is
-    /// now awaiting commits.
+    /// Cancel windows currently open, gate-satisfied, unprompted, and affordable
+    /// (unaffordable windows auto-pass silently — no prompt spam, no information).
+    fn open_cancels(&self, i: usize) -> Vec<(u32, CancelWindow)> {
+        let t = self.t;
+        let e = &self.entities[i];
+        let Some(inst) = e.current else {
+            return Vec::new();
+        };
+        let Some(mv) = e.current_move() else {
+            return Vec::new();
+        };
+        let Some(elapsed) = e.move_elapsed(t) else {
+            return Vec::new();
+        };
+        let past_active = elapsed >= mv.timing.startup + mv.timing.active;
+        mv.cancels
+            .iter()
+            .enumerate()
+            .filter(|&(idx, w)| {
+                let idx32 = u32::try_from(idx).expect("few windows");
+                if inst.cancels_prompted & (1 << idx32) != 0 {
+                    return false;
+                }
+                if elapsed < w.from || elapsed > w.to {
+                    return false;
+                }
+                let satisfied = match w.gate {
+                    CancelGate::OnHit => inst.hit_landed,
+                    CancelGate::OnBlock => inst.blocked,
+                    CancelGate::OnContact => inst.hit_landed || inst.blocked,
+                    CancelGate::OnWhiff => past_active && !inst.hit_landed && !inst.blocked,
+                    CancelGate::Always => true,
+                };
+                if !satisfied {
+                    return false;
+                }
+                let Some(target) = e.moves.iter().find(|m| m.id == w.into) else {
+                    return false;
+                };
+                e.ap >= w.ap_cost + target.cost.ap
+                    && e.focus >= w.focus_cost + target.cost.focus
+                    && e.breath >= target.cost.breath
+            })
+            .map(|(idx, w)| (u32::try_from(idx).expect("few windows"), *w))
+            .collect()
+    }
+
+    /// Collect this tick's prompts. Returns true if a batch is now awaiting commits.
     fn collect_decisions(&mut self) -> bool {
         let t = self.t;
-        let pending: Vec<PendingDecision> = self
-            .entities
-            .iter()
-            .filter_map(|e| match e.state {
-                ActorState::Free if e.ready_tick == t => Some(PendingDecision {
+        let mut pending: Vec<PendingDecision> = Vec::new();
+        for i in 0..self.entities.len() {
+            let e = &self.entities[i];
+            match e.state {
+                // <= catches actors freed mid-tick (e.g. a dissolved grab at TickEnd):
+                // nobody starves on a stale ready_tick.
+                ActorState::Free if e.ready_tick <= t => pending.push(PendingDecision {
                     actor: e.id,
                     side: e.side,
                     kind: DecisionKind::Ready,
                 }),
-                ActorState::HoldingStance if e.reevaluate_at == t => Some(PendingDecision {
+                ActorState::HoldingStance if e.reevaluate_at == t => {
+                    pending.push(PendingDecision {
+                        actor: e.id,
+                        side: e.side,
+                        kind: DecisionKind::StanceReevaluate,
+                    });
+                }
+                ActorState::Down { until } if until == t => pending.push(PendingDecision {
                     actor: e.id,
                     side: e.side,
-                    kind: DecisionKind::StanceReevaluate,
+                    kind: DecisionKind::WakeUp,
                 }),
-                _ => None,
-            })
-            .collect();
+                ActorState::Acting if !self.open_cancels(i).is_empty() => {
+                    pending.push(PendingDecision {
+                        actor: e.id,
+                        side: e.side,
+                        kind: DecisionKind::Cancel,
+                    });
+                }
+                _ => {}
+            }
+        }
         if pending.is_empty() {
             return false;
         }
@@ -356,6 +481,10 @@ impl CombatSim {
             committed: std::collections::BTreeMap::new(),
         });
         true
+    }
+
+    fn affordable(e: &Entity, mv: &Move) -> bool {
+        e.breath >= mv.cost.breath && e.ap >= mv.cost.ap && e.focus >= mv.cost.focus
     }
 
     fn validate_choice(
@@ -378,14 +507,21 @@ impl CombatSim {
             return Err(CommitError::AlreadyCommitted { actor });
         }
         let entity = self.entity(actor).expect("pending actor exists");
+        let i = self.index_of(actor);
         match (pending.kind, choice) {
             (DecisionKind::Ready, Choice::Wait { .. }) => Ok(()),
             (DecisionKind::Ready, Choice::Move { id }) => {
                 let Some(mv) = entity.moves.iter().find(|m| m.id == id) else {
                     return Err(CommitError::UnknownOrUnmetMove { actor });
                 };
-                // Free actors are standing in Phase 1; crouch-required moves are only
-                // reachable from a held crouching stance.
+                if mv.req_down {
+                    return Err(CommitError::UnknownOrUnmetMove { actor });
+                }
+                if !Self::affordable(entity, mv) {
+                    return Err(CommitError::Denied { actor });
+                }
+                // Free actors are standing; crouch-required moves are only reachable
+                // from a held crouching stance.
                 match mv.req_stance {
                     None | Some(StanceReq::Standing) => Ok(()),
                     Some(StanceReq::Crouching) => Err(CommitError::UnknownOrUnmetMove { actor }),
@@ -395,8 +531,7 @@ impl CombatSim {
             (DecisionKind::StanceReevaluate, Choice::Move { id }) => {
                 // Direct moves from a held stance: only from a pure body stance (no
                 // guard commitment) whose kind the move requires — the while-crouching
-                // idiom. Guarded holds must Release first (spec §5.3: release is brief
-                // but real).
+                // idiom. Guarded holds must Release first (spec §5.3).
                 let held = entity.held.expect("holding");
                 if held.guard.is_some() {
                     return Err(CommitError::IllegalChoice {
@@ -407,6 +542,12 @@ impl CombatSim {
                 let Some(mv) = entity.moves.iter().find(|m| m.id == id) else {
                     return Err(CommitError::UnknownOrUnmetMove { actor });
                 };
+                if mv.req_down {
+                    return Err(CommitError::UnknownOrUnmetMove { actor });
+                }
+                if !Self::affordable(entity, mv) {
+                    return Err(CommitError::Denied { actor });
+                }
                 let matches_stance = matches!(
                     (held.stance, mv.req_stance),
                     (StanceKind::Crouching, Some(StanceReq::Crouching))
@@ -419,6 +560,39 @@ impl CombatSim {
                 }
             }
             (DecisionKind::ThrowBreak { .. }, Choice::ThrowBreak { .. }) => Ok(()),
+            (DecisionKind::Cancel, Choice::Cancel { into }) => match into {
+                None => Ok(()),
+                Some(id) => {
+                    if self.open_cancels(i).iter().any(|(_, w)| w.into == id) {
+                        Ok(())
+                    } else {
+                        Err(CommitError::UnknownOrUnmetMove { actor })
+                    }
+                }
+            },
+            (DecisionKind::WakeUp, Choice::Rise | Choice::BackRise) => Ok(()),
+            (DecisionKind::WakeUp, Choice::DelayRise { ticks }) => {
+                if ticks >= 1 && ticks <= self.ruleset.wake_delay_max {
+                    Ok(())
+                } else {
+                    Err(CommitError::IllegalChoice {
+                        actor,
+                        why: "delay outside wake_delay_max",
+                    })
+                }
+            }
+            (DecisionKind::WakeUp, Choice::Move { id }) => {
+                let Some(mv) = entity.moves.iter().find(|m| m.id == id) else {
+                    return Err(CommitError::UnknownOrUnmetMove { actor });
+                };
+                if !mv.req_down {
+                    return Err(CommitError::UnknownOrUnmetMove { actor });
+                }
+                if !Self::affordable(entity, mv) {
+                    return Err(CommitError::Denied { actor });
+                }
+                Ok(())
+            }
             _ => Err(CommitError::IllegalChoice {
                 actor,
                 why: "choice does not fit prompt",
@@ -445,10 +619,49 @@ impl CombatSim {
                         t + u64::from(self.ruleset.block_reevaluate_every);
                 }
                 Choice::Release => self.release_stance(i),
+                Choice::Cancel { into } => match into {
+                    Some(id) => self.take_cancel(i, id),
+                    None => {
+                        // Decline every window open this tick — final for those windows.
+                        let open: Vec<u32> =
+                            self.open_cancels(i).iter().map(|&(idx, _)| idx).collect();
+                        if let Some(inst) = &mut self.entities[i].current {
+                            for idx in open {
+                                inst.cancels_prompted |= 1 << idx;
+                            }
+                        }
+                    }
+                },
+                Choice::Rise => self.rise(i, self.ruleset.wake_rise_ticks, Fx::ZERO),
+                Choice::BackRise => {
+                    self.rise(
+                        i,
+                        self.ruleset.wake_back_rise_ticks,
+                        self.ruleset.wake_back_rise_push,
+                    );
+                }
+                Choice::DelayRise { ticks } => {
+                    self.entities[i].state = ActorState::Down {
+                        until: t + u64::from(ticks.max(1)),
+                    };
+                }
                 // Break batches never reach here (resolve_breaks consumes them).
                 Choice::ThrowBreak { .. } => debug_assert!(false, "break in tick-start batch"),
             }
         }
+    }
+
+    /// Wake-up rise: standing and hittable immediately (the meaty window), actionable
+    /// after the rise ticks.
+    fn rise(&mut self, i: usize, rise_ticks: u32, back_push: Fx) {
+        let t = self.t;
+        let back = self.entities[i].facing * back_push;
+        let e = &mut self.entities[i];
+        e.stance = Stance::Standing;
+        e.height_off = Fx::ZERO;
+        let pos = e.pos - back;
+        e.pos = spatial::clamp_to_arena(&self.arena, pos).0;
+        self.set_free(i, t + u64::from(rise_ticks.max(1)));
     }
 
     fn start_move(&mut self, i: usize, id: MoveId) {
@@ -470,7 +683,17 @@ impl CombatSim {
             })
             .unwrap_or(0);
         let keeps_crouch = mv.req_stance == Some(StanceReq::Crouching);
+        let cost = mv.cost;
+        let always_gains: Vec<(GainResource, u32)> = mv
+            .gains
+            .iter()
+            .filter(|g| g.gate == GainGate::Always)
+            .map(|g| (g.resource, g.amount))
+            .collect();
         let e = &mut self.entities[i];
+        e.breath = e.breath.saturating_sub(cost.breath);
+        e.ap = e.ap.saturating_sub(cost.ap);
+        e.focus = e.focus.saturating_sub(cost.focus);
         e.current = Some(MoveInstance {
             move_id: id,
             move_index: index,
@@ -478,14 +701,67 @@ impl CombatSim {
             armor_hits_left: armor,
             grabbed_victim: None,
             connected_at: None,
+            hit_landed: false,
+            blocked: false,
+            cancels_prompted: 0,
         });
         e.state = ActorState::Acting;
         e.held = None;
+        e.height_off = Fx::ZERO;
         e.stance = if keeps_crouch {
             Stance::Crouching
         } else {
             Stance::Standing
         };
+        for (resource, amount) in always_gains {
+            self.gain(i, resource, amount);
+        }
+    }
+
+    /// Pay the window + target costs and chain (spec §11): the combo's links are bought.
+    fn take_cancel(&mut self, i: usize, into: MoveId) {
+        let open = self.open_cancels(i);
+        let (_, window) = open
+            .iter()
+            .find(|(_, w)| w.into == into)
+            .copied()
+            .expect("validated cancel");
+        let e = &mut self.entities[i];
+        e.ap = e.ap.saturating_sub(window.ap_cost);
+        e.focus = e.focus.saturating_sub(window.focus_cost);
+        self.start_move(i, into);
+    }
+
+    fn gain(&mut self, i: usize, resource: GainResource, amount: u32) {
+        let e = &mut self.entities[i];
+        match resource {
+            GainResource::Breath => e.breath = (e.breath + amount).min(e.defense.breath_max),
+            GainResource::Ap => e.ap = (e.ap + amount).min(e.defense.ap_max),
+            GainResource::Focus => e.focus = (e.focus + amount).min(e.defense.focus_max),
+        }
+    }
+
+    /// Apply an actor's authored gains for a gate from its live in-flight move (the
+    /// parrier's path — its move survives the contact).
+    fn move_gains(&mut self, i: usize, gate: GainGate) {
+        let mv = self.entities[i].current_move().cloned();
+        if let Some(mv) = mv {
+            self.move_gains_from(i, &mv, gate);
+        }
+    }
+
+    /// Apply authored gains from an explicit move (the attacker's path — a trade may
+    /// have interrupted the move by application time, but the landed hit still pays).
+    fn move_gains_from(&mut self, i: usize, mv: &Move, gate: GainGate) {
+        let gains: Vec<(GainResource, u32)> = mv
+            .gains
+            .iter()
+            .filter(|g| g.gate == gate)
+            .map(|g| (g.resource, g.amount))
+            .collect();
+        for (resource, amount) in gains {
+            self.gain(i, resource, amount);
+        }
     }
 
     /// Releasing a held stance pays the stance move's authored release recovery: re-enter
@@ -512,29 +788,19 @@ impl CombatSim {
                     armor_hits_left: 0,
                     grabbed_victim: None,
                     connected_at: None,
+                    hit_landed: false,
+                    blocked: false,
+                    cancels_prompted: 0,
                 });
             }
             None => {
                 // Held spec without a matching move is authoring rot; release instantly.
-                e.state = ActorState::Free;
-                e.ready_tick = t;
+                self.set_free(i, t);
             }
         }
     }
 
-    /// Commit-time facing (even from non-actionable-looking transitions).
-    fn auto_face_forced(&mut self, i: usize) {
-        let target = self.entities[i].target;
-        let Some(target_pos) = self.entity(target).map(|e| e.pos) else {
-            return;
-        };
-        let dir = (target_pos - self.entities[i].pos).normalize_or_zero();
-        if dir != FxVec2::ZERO {
-            self.entities[i].facing = dir;
-        }
-    }
-
-    // ── stage: world ─────────────────────────────────────────────────────────
+    // -- stage: world ---------------------------------------------------------
 
     /// Authored self-displacement, spread evenly across the current phase's ticks
     /// (spec §3.6).
@@ -561,7 +827,7 @@ impl CombatSim {
             let e = &self.entities[i];
             let step = e.facing * (phase_motion.forward / len)
                 + e.facing.perp() * (phase_motion.lateral / len);
-            let pos = spatial::clamp_to_arena(&self.arena, e.pos + step);
+            let pos = spatial::clamp_to_arena(&self.arena, e.pos + step).0;
             self.entities[i].pos = pos;
         }
     }
@@ -576,6 +842,9 @@ impl CombatSim {
         struct Resolved {
             attacker: usize,
             victim: usize,
+            /// Cloned from the snapshot: a trade may interrupt the attacker before this
+            /// contact applies, but the contact already happened (spec §4.2 trades).
+            mv: Move,
             hit_index: usize,
             outcome: ContactOutcome,
         }
@@ -605,6 +874,7 @@ impl CombatSim {
                         resolved.push(Resolved {
                             attacker: ai,
                             victim: vi,
+                            mv: mv.clone(),
                             hit_index: hi,
                             outcome: ContactOutcome::Hit { counter: false },
                         });
@@ -641,6 +911,7 @@ impl CombatSim {
                                 resolved.push(Resolved {
                                     attacker: ai,
                                     victim: vi,
+                                    mv: mv.clone(),
                                     hit_index: 0,
                                     outcome: ContactOutcome::ThrowTech,
                                 });
@@ -651,6 +922,7 @@ impl CombatSim {
                             resolved.push(Resolved {
                                 attacker: ai,
                                 victim: vi,
+                                mv: mv.clone(),
                                 hit_index: 0,
                                 outcome: ContactOutcome::GrabConnected,
                             });
@@ -681,6 +953,7 @@ impl CombatSim {
                             resolved.push(Resolved {
                                 attacker: ai,
                                 victim: vi,
+                                mv: mv.clone(),
                                 hit_index: hi,
                                 outcome,
                             });
@@ -692,7 +965,7 @@ impl CombatSim {
         }
 
         for r in resolved {
-            self.apply_outcome(r.attacker, r.victim, r.hit_index, r.outcome);
+            self.apply_outcome(r.attacker, r.victim, &r.mv, r.hit_index, r.outcome);
         }
 
         // Grab connects open break prompts — one batch, defender side(s) commit blind.
@@ -715,18 +988,61 @@ impl CombatSim {
         }
     }
 
+    /// Governor 1 — hitstun decay: combo hit `n` loses `n * step` ticks of stun.
+    fn decayed_stun(&self, combo_hits: u32, stun: u32) -> u32 {
+        stun.saturating_sub(combo_hits * self.ruleset.hitstun_decay_step)
+    }
+
+    /// Governor 2 — juggle damage decay (× defender weight).
+    fn juggle_damage(&self, combo_hits: u32, weight: Fx, damage: u32) -> u32 {
+        let step = self.ruleset.juggle_decay_step * weight;
+        let mult = Fx::ONE - step * Fx::from_num(combo_hits);
+        if mult <= Fx::ZERO {
+            0
+        } else {
+            scale_damage(damage, mult)
+        }
+    }
+
+    /// Governor 7 — the gravity floor: can the attacker even pick this stun up? If the
+    /// decayed stun undercuts every affordable strike's startup, the juggle drops.
+    fn gravity_floor_drops(&self, ai: usize, decayed: u32) -> bool {
+        if !self.ruleset.forced_landing {
+            return false;
+        }
+        let attacker = &self.entities[ai];
+        let min_pickup = attacker
+            .moves
+            .iter()
+            .filter(|m| m.category == MoveCategory::Strike && Self::affordable(attacker, m))
+            .map(|m| m.timing.startup)
+            .min();
+        match min_pickup {
+            Some(startup) => decayed < startup,
+            None => true, // nothing affordable: it drops by definition
+        }
+    }
+
     #[expect(
         clippy::too_many_lines,
         reason = "the priority-table application is one table"
     )]
-    fn apply_outcome(&mut self, ai: usize, vi: usize, hit_index: usize, outcome: ContactOutcome) {
+    fn apply_outcome(
+        &mut self,
+        ai: usize,
+        vi: usize,
+        mv: &Move,
+        hit_index: usize,
+        outcome: ContactOutcome,
+    ) {
         let t = self.t;
         let attacker_id = self.entities[ai].id;
         let victim_id = self.entities[vi].id;
-        let mv = self.entities[ai].current_move().expect("acting").clone();
         let hit = mv.hits.get(hit_index).cloned();
 
         let mut damage_applied = 0u32;
+        let mut reaction_applied: Option<Reaction> = None;
+        let mut combo_hits = 0u32;
         match outcome {
             ContactOutcome::Whiff => {}
             ContactOutcome::ThrowTech => {
@@ -754,13 +1070,26 @@ impl CombatSim {
                 a.state = ActorState::Hitstun {
                     until: t + u64::from(freeze_attacker.max(1)),
                 };
+                // The parrier banks its authored gains + the Ruleset's parry Focus
+                // (skill pays — spec §9).
+                self.move_gains(vi, GainGate::OnParry);
+                let parry_focus = self.ruleset.focus_gains.parry;
+                self.gain(vi, GainResource::Focus, parry_focus);
                 let v = &mut self.entities[vi];
                 v.current = None;
                 v.state = ActorState::Free;
                 v.ready_tick = t + u64::from(parry_recovery);
+                let vap = v.defense.ap_max;
+                v.ap = vap;
             }
             ContactOutcome::Blocked => {
                 let hit = hit.expect("strike outcome has a hit");
+                if let Some(inst) = &mut self.entities[ai].current {
+                    inst.blocked = true;
+                }
+                self.move_gains_from(ai, mv, GainGate::OnBlock);
+                let blocked_focus = self.ruleset.focus_gains.hit_blocked;
+                self.gain(ai, GainResource::Focus, blocked_focus);
                 let push = self.entities[ai].facing * hit.block_push;
                 let v = &mut self.entities[vi];
                 v.guard = v.guard.saturating_sub(hit.chip_guard);
@@ -778,11 +1107,14 @@ impl CombatSim {
                         until: t + u64::from(hit.blockstun),
                     };
                 }
-                let pos = spatial::clamp_to_arena(&self.arena, self.entities[vi].pos + push);
+                let pos = spatial::clamp_to_arena(&self.arena, self.entities[vi].pos + push).0;
                 self.entities[vi].pos = pos;
             }
             ContactOutcome::Armored => {
                 let hit = hit.expect("strike outcome has a hit");
+                if let Some(inst) = &mut self.entities[ai].current {
+                    inst.blocked = true; // contact happened: ON_CONTACT gates open
+                }
                 let mult = self.entities[vi]
                     .current_move()
                     .into_iter()
@@ -803,7 +1135,40 @@ impl CombatSim {
                 let was_grab_followthrough = self.entities[ai]
                     .current
                     .is_some_and(|c| c.grabbed_victim.is_some());
-                let (reaction, damage) = if counter {
+                if !was_grab_followthrough && let Some(inst) = &mut self.entities[ai].current {
+                    inst.hit_landed = true;
+                }
+
+                // Whose combo is this? Fresh trackers for fresh victims.
+                if !self.entities[vi].in_combo_state() {
+                    self.entities[vi].combo = ComboTracker::default();
+                }
+                let combo_index = self.entities[vi].combo.hits;
+                let airborne = matches!(
+                    self.entities[vi].state,
+                    ActorState::Airborne { .. } | ActorState::WallSplat { .. }
+                );
+
+                // Attacker gains: hit + the skillful-CH split (spec §9 gain table).
+                self.move_gains_from(ai, mv, GainGate::OnHit);
+                let land_focus = self.ruleset.focus_gains.land_hit;
+                self.gain(ai, GainResource::Focus, land_focus);
+                if counter {
+                    self.move_gains_from(ai, mv, GainGate::OnCh);
+                    let whiffed_recovery =
+                        self.entities[vi].move_phase(t) == Some(MovePhase::Recovery);
+                    if whiffed_recovery {
+                        self.move_gains_from(ai, mv, GainGate::OnWhiffPunish);
+                        let wp = self.ruleset.focus_gains.whiff_punish;
+                        self.gain(ai, GainResource::Focus, wp);
+                    } else {
+                        let chf = self.ruleset.focus_gains.counter_hit;
+                        self.gain(ai, GainResource::Focus, chf);
+                    }
+                }
+
+                // Reaction + damage selection (CH override / Ruleset default / decay).
+                let (mut reaction, mut damage) = if counter {
                     match hit.ch_reaction {
                         Some(ch) => (ch, hit.damage),
                         None => {
@@ -822,6 +1187,10 @@ impl CombatSim {
                 } else {
                     (hit.reaction, hit.damage)
                 };
+                if airborne {
+                    let weight = self.entities[vi].defense.weight;
+                    damage = self.juggle_damage(combo_index, weight, damage);
+                }
                 damage_applied = damage;
                 self.damage(vi, damage);
                 if self.entities[vi].state != ActorState::Ko {
@@ -833,10 +1202,24 @@ impl CombatSim {
                             if let Some(inst) = &mut self.entities[ai].current {
                                 inst.grabbed_victim = None;
                             }
-                            self.apply_reaction(ai, vi, reaction);
+                            self.apply_reaction(ai, vi, &hit, reaction, combo_index);
+                            reaction_applied = Some(reaction);
                         }
                     } else {
-                        self.apply_reaction(ai, vi, reaction);
+                        // Grounded Screw/Bound degrade before application (spec §6.1).
+                        if !airborne {
+                            reaction = match reaction {
+                                Reaction::Screw { stun, .. } | Reaction::Bound { stun } => {
+                                    Reaction::Hitstun { ticks: stun }
+                                }
+                                other => other,
+                            };
+                        }
+                        // Count the hit BEFORE applying: an ender's end_combo must see it.
+                        self.entities[vi].combo.hits = combo_index + 1;
+                        combo_hits = combo_index + 1;
+                        self.apply_reaction(ai, vi, &hit, reaction, combo_index);
+                        reaction_applied = Some(reaction);
                     }
                 }
             }
@@ -849,41 +1232,211 @@ impl CombatSim {
             mv: mv.id,
             outcome,
             damage: damage_applied,
+            reaction: reaction_applied,
+            combo_hits,
         });
     }
 
-    fn apply_reaction(&mut self, ai: usize, vi: usize, reaction: Reaction) {
+    /// Interrupt an actor's in-flight move: the move is gone, any held stance drops,
+    /// and a victim held by the now-interrupted throw goes free immediately (no path
+    /// may strand a Grabbed actor).
+    fn interrupt_actor(&mut self, i: usize) {
+        let held_victim = self.entities[i].current.and_then(|c| c.grabbed_victim);
+        self.entities[i].current = None;
+        self.entities[i].held = None;
+        if let Some(victim) = held_victim {
+            self.release_grabbed(victim);
+        }
+    }
+
+    /// Apply a (possibly decayed/degraded) reaction. The victim's current juggle state
+    /// shapes the application; the extender latches (governor 3) and the gravity floor
+    /// (governor 7) bind here.
+    fn apply_reaction(
+        &mut self,
+        ai: usize,
+        vi: usize,
+        hit: &crate::data::HitEvent,
+        reaction: Reaction,
+        combo_index: u32,
+    ) {
         let t = self.t;
+        let latches = self.ruleset.extender_latches;
+        let airborne = matches!(
+            self.entities[vi].state,
+            ActorState::Airborne { .. } | ActorState::WallSplat { .. }
+        );
+        // A sustained juggle keeps flying; everything else resolves below.
+        if airborne {
+            let carry = hit.juggle_carry;
+            match reaction {
+                Reaction::Hitstun { ticks } | Reaction::Crumple { ticks } => {
+                    self.sustain_juggle(ai, vi, ticks, combo_index, carry);
+                }
+                Reaction::Launch {
+                    rise,
+                    carry: lcarry,
+                    stun,
+                } => {
+                    let e = &mut self.entities[vi];
+                    e.height_off = e.height_off.max(rise);
+                    self.sustain_juggle(ai, vi, stun, combo_index, carry + lcarry);
+                }
+                Reaction::Screw {
+                    carry: scarry,
+                    stun,
+                } => {
+                    if self.entities[vi].combo.screw_used < latches.screw {
+                        self.entities[vi].combo.screw_used += 1;
+                        // Flattened arc, extended carry (🔬 T7 tailspin).
+                        let e = &mut self.entities[vi];
+                        e.height_off /= Fx::from_num(2);
+                        self.sustain_juggle(ai, vi, stun, combo_index, carry + scarry);
+                    } else {
+                        self.sustain_juggle(ai, vi, stun, combo_index, carry);
+                    }
+                }
+                Reaction::Bound { stun } => {
+                    if self.entities[vi].combo.bound_used < latches.bound {
+                        self.entities[vi].combo.bound_used += 1;
+                        // Slammed to a re-juggleable bounce (🔬 T6 bound).
+                        self.entities[vi].height_off = Fx::from_num(1) / Fx::from_num(2);
+                        self.sustain_juggle(ai, vi, stun, combo_index, Fx::ZERO);
+                    } else {
+                        self.sustain_juggle(ai, vi, stun, combo_index, carry);
+                    }
+                }
+                Reaction::Knockdown {
+                    hard: _,
+                    down_ticks,
+                } => {
+                    self.interrupt_actor(vi);
+                    let e = &mut self.entities[vi];
+                    e.state = ActorState::Down {
+                        until: t + u64::from(down_ticks.max(1)),
+                    };
+                    e.stance = Stance::Down;
+                    e.height_off = Fx::ZERO;
+                    self.end_combo(vi);
+                }
+                Reaction::Push { dist } => {
+                    self.displace_victim(ai, vi, dist);
+                }
+            }
+            return;
+        }
+
         match reaction {
             Reaction::Hitstun { ticks } => {
-                let v = &mut self.entities[vi];
-                v.current = None;
-                v.held = None;
-                v.state = ActorState::Hitstun {
-                    until: t + u64::from(ticks.max(1)),
+                let stun = self.decayed_stun(combo_index, ticks).max(1);
+                self.interrupt_actor(vi);
+                self.entities[vi].state = ActorState::Hitstun {
+                    until: t + u64::from(stun),
                 };
+            }
+            Reaction::Crumple { ticks } => {
+                let stun = self.decayed_stun(combo_index, ticks).max(1);
+                self.interrupt_actor(vi);
+                self.entities[vi].state = ActorState::Crumple {
+                    until: t + u64::from(stun),
+                };
+            }
+            Reaction::Launch { rise, carry, stun } => {
+                let decayed = self.decayed_stun(combo_index, stun).max(1);
+                if self.gravity_floor_drops(ai, decayed) {
+                    self.interrupt_actor(vi);
+                    self.trace.push(TraceEvent::Landed {
+                        t,
+                        victim: self.entities[vi].id,
+                    });
+                    self.floor(vi, "gravity floor");
+                    return;
+                }
+                self.interrupt_actor(vi);
+                let e = &mut self.entities[vi];
+                e.state = ActorState::Airborne {
+                    stun_until: t + u64::from(decayed),
+                };
+                e.stance = Stance::Airborne;
+                e.height_off = rise;
+                self.displace_victim(ai, vi, carry);
+            }
+            // Screw/Bound were degraded to Hitstun by the caller on grounded victims.
+            Reaction::Screw { .. } | Reaction::Bound { .. } => {
+                debug_assert!(false, "grounded extender must be degraded by the caller");
             }
             Reaction::Knockdown {
                 hard: _,
                 down_ticks,
             } => {
-                let v = &mut self.entities[vi];
-                v.current = None;
-                v.held = None;
-                v.stance = Stance::Down;
-                v.state = ActorState::Down {
+                self.interrupt_actor(vi);
+                let e = &mut self.entities[vi];
+                e.state = ActorState::Down {
                     until: t + u64::from(down_ticks.max(1)),
                 };
+                e.stance = Stance::Down;
+                self.end_combo(vi);
             }
             Reaction::Push { dist } => {
-                let push = self.entities[ai].facing * dist;
-                let pos = spatial::clamp_to_arena(&self.arena, self.entities[vi].pos + push);
-                self.entities[vi].pos = pos;
+                self.displace_victim(ai, vi, dist);
             }
         }
     }
 
+    /// Keep an airborne victim flying: decayed stun, carry, the gravity floor, and the
+    /// splat check on the carry. WallSplat pickups return to Airborne here.
+    fn sustain_juggle(&mut self, ai: usize, vi: usize, stun: u32, combo_index: u32, carry: Fx) {
+        let t = self.t;
+        let decayed = self.decayed_stun(combo_index, stun);
+        if decayed == 0 || self.gravity_floor_drops(ai, decayed) {
+            self.trace.push(TraceEvent::Landed {
+                t,
+                victim: self.entities[vi].id,
+            });
+            self.floor(vi, "gravity floor");
+            return;
+        }
+        self.entities[vi].state = ActorState::Airborne {
+            stun_until: t + u64::from(decayed),
+        };
+        self.entities[vi].stance = Stance::Airborne;
+        self.displace_victim(ai, vi, carry);
+    }
+
+    /// Displace a hit victim along the attacker's facing; a splat-able wall catches
+    /// airborne victims (once per combo) instead of clamping (spec §3.7).
+    fn displace_victim(&mut self, ai: usize, vi: usize, dist: Fx) {
+        let t = self.t;
+        let push = self.entities[ai].facing * dist;
+        let target = self.entities[vi].pos + push;
+        let (clamped, wall) = spatial::clamp_to_arena(&self.arena, target);
+        self.entities[vi].pos = clamped;
+        let Some(wall) = wall else { return };
+        let airborne = matches!(
+            self.entities[vi].state,
+            ActorState::Airborne { .. } | ActorState::WallSplat { .. }
+        );
+        if !airborne || !wall.splattable {
+            return;
+        }
+        if self.entities[vi].combo.splat_used >= self.ruleset.extender_latches.wall_splat {
+            return;
+        }
+        self.entities[vi].combo.splat_used += 1;
+        let until = t + u64::from(self.ruleset.splat_duration.max(1));
+        self.entities[vi].state = ActorState::WallSplat { until };
+        self.trace.push(TraceEvent::WallSplat {
+            t,
+            victim: self.entities[vi].id,
+        });
+    }
+
     fn damage(&mut self, vi: usize, amount: u32) {
+        // The comeback factor: taking damage banks a little Focus (spec §9).
+        let comeback = amount.saturating_mul(self.ruleset.focus_gains.take_damage_per_100) / 100;
+        if comeback > 0 {
+            self.gain(vi, GainResource::Focus, comeback);
+        }
         let v = &mut self.entities[vi];
         if v.state == ActorState::Ko {
             return;
@@ -908,13 +1461,11 @@ impl CombatSim {
         let half_push = self.ruleset.throw_tech_push / Fx::from_num(2);
         for &i in &[ai, vi] {
             let back = self.entities[i].facing * half_push;
-            let e = &mut self.entities[i];
-            e.current = None;
-            e.held = None;
-            e.state = ActorState::Free;
-            e.ready_tick = t + recovery;
-            let pos = e.pos - back;
-            self.entities[i].pos = spatial::clamp_to_arena(&self.arena, pos);
+            self.entities[i].current = None;
+            self.entities[i].held = None;
+            let pos = self.entities[i].pos - back;
+            self.entities[i].pos = spatial::clamp_to_arena(&self.arena, pos).0;
+            self.set_free(i, t + recovery);
         }
     }
 
@@ -936,6 +1487,22 @@ impl CombatSim {
             let Choice::ThrowBreak { guess } = choice else {
                 unreachable!("validated")
             };
+            // A same-tick trade may have interrupted the thrower between the connect
+            // and this resolution: the grab dissolves and the victim goes free.
+            let still_holding = self.entities[grab.attacker].state == ActorState::Acting
+                && self.entities[grab.attacker]
+                    .current
+                    .is_some_and(|c| c.grabbed_victim == Some(victim_id));
+            if !still_holding {
+                self.release_grabbed(victim_id);
+                self.trace.push(TraceEvent::ThrowResolved {
+                    t,
+                    attacker: attacker_id,
+                    victim: victim_id,
+                    resolution: ThrowResolution::Interrupted,
+                });
+                continue;
+            }
             let key = self.entities[grab.attacker]
                 .current_move()
                 .and_then(|m| m.break_key);
@@ -966,6 +1533,7 @@ impl CombatSim {
                         self.apply_outcome(
                             grab.attacker,
                             grab.victim,
+                            &mv,
                             hi,
                             ContactOutcome::Hit { counter: false },
                         );
@@ -977,25 +1545,53 @@ impl CombatSim {
 
     fn release_grabbed(&mut self, victim: EntityId) {
         let vi = self.index_of(victim);
-        let v = &mut self.entities[vi];
-        if matches!(v.state, ActorState::Grabbed { .. }) {
-            v.state = ActorState::Free;
-            v.ready_tick = self.t;
-            v.stance = Stance::Standing;
+        if matches!(self.entities[vi].state, ActorState::Grabbed { .. }) {
+            self.entities[vi].stance = Stance::Standing;
+            let t = self.t;
+            self.set_free(vi, t);
         }
     }
 
-    // ── stage: tick end ──────────────────────────────────────────────────────
+    // -- stage: tick end ------------------------------------------------------
 
     fn upkeep_end(&mut self) {
-        // Guard regen: slow, while not blocking (spec §5.3).
+        // Orphaned-grab sweep: a victim held by an interrupted or KO'd thrower goes
+        // free (no path may strand a Grabbed actor — the no-deadlock invariant).
+        let orphaned: Vec<EntityId> = self
+            .entities
+            .iter()
+            .filter_map(|v| match v.state {
+                ActorState::Grabbed { by } => {
+                    let held = self.entities.iter().find(|a| a.id == by).is_some_and(|a| {
+                        a.state == ActorState::Acting
+                            && a.current.is_some_and(|c| c.grabbed_victim == Some(v.id))
+                    });
+                    if held { None } else { Some(v.id) }
+                }
+                _ => None,
+            })
+            .collect();
+        for id in orphaned {
+            self.release_grabbed(id);
+        }
         for e in &mut self.entities {
-            let blocking = e.guarding();
-            if !blocking && e.state != ActorState::Ko && e.guard < e.defense.guard_max {
+            if e.state == ActorState::Ko {
+                continue;
+            }
+            // Guard regen: slow, while not blocking (spec §5.3).
+            if !e.guarding() && e.guard < e.defense.guard_max {
                 e.guard_regen_acc += 1;
                 if e.guard_regen_acc >= e.defense.guard_regen_interval {
                     e.guard_regen_acc = 0;
                     e.guard += 1;
+                }
+            }
+            // Breath regen: while not executing (spec §9).
+            if e.state != ActorState::Acting && e.breath < e.defense.breath_max {
+                e.breath_regen_acc += 1;
+                if e.breath_regen_acc >= e.defense.breath_regen_interval {
+                    e.breath_regen_acc = 0;
+                    e.breath += 1;
                 }
             }
         }

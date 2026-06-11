@@ -20,13 +20,15 @@ fn canonical_script() -> Script {
         (0, A, Choice::Move { id: MID_POKE }),
         (0, B, Choice::Move { id: SIDESTEP_L }),
         (13, B, Choice::Move { id: MID_POKE }),
-        // A rises from the CH knockdown at T65 and turtles; B chips then grabs.
-        (65, A, Choice::Move { id: STAND_GUARD }),
+        // B pokes the air over downed A (the whiff beat), then meets A's risen guard.
         (43, B, Choice::Move { id: JAB }),
-        (67, B, Choice::Move { id: JAB }),
-        (83, B, Choice::Move { id: THROW_L }),
+        // A wakes at T65, rises, and turtles.
+        (65, A, Choice::Rise),
+        (73, A, Choice::Move { id: STAND_GUARD }),
+        (75, B, Choice::Move { id: JAB }),
+        (91, B, Choice::Move { id: THROW_L }),
         (
-            93,
+            101,
             A,
             Choice::ThrowBreak {
                 guess: Some(ThrowBreakKey::L),
@@ -37,7 +39,7 @@ fn canonical_script() -> Script {
 
 fn run_canonical() -> Vec<TraceEvent> {
     let mut sim = duel(200);
-    run(&mut sim, &canonical_script(), 120);
+    run(&mut sim, &canonical_script(), 130);
     sim.trace().to_vec()
 }
 
@@ -67,7 +69,7 @@ fn replay_from_trace_byte_identical() {
             .collect(),
     };
     let mut sim = duel(200);
-    run(&mut sim, &recovered, 120);
+    run(&mut sim, &recovered, 130);
     assert_eq!(
         trace_json(sim.trace()).into_bytes(),
         trace_json(&original).into_bytes()

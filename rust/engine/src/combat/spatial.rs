@@ -4,8 +4,8 @@
 //! model hides behind it.
 
 use crate::core::fx::{Fx, FxVec2};
-use crate::data::ArenaDef;
 use crate::data::movedef::{Height, Move, MoveCategory, Tracking};
+use crate::data::{ArenaDef, WallSpec};
 
 use super::entity::{Entity, Stance};
 
@@ -80,14 +80,27 @@ pub fn does_hit_spatially(attacker: &Entity, mv: &Move, victim: &Entity) -> bool
     true
 }
 
-/// Clamp a position to the arena floor boundary (spec §3.1; wall segments join in
-/// Phase 2).
+/// Clamp a position to the arena boundary. Returns the clamped position plus the wall
+/// that did the clamping, if any (the splat check's input, spec §3.7). A corner clamp
+/// reports the x-axis wall (stable, arbitrary).
 #[must_use]
-pub fn clamp_to_arena(arena: &ArenaDef, pos: FxVec2) -> FxVec2 {
-    FxVec2::new(
+pub fn clamp_to_arena(arena: &ArenaDef, pos: FxVec2) -> (FxVec2, Option<WallSpec>) {
+    let clamped = FxVec2::new(
         pos.x.clamp(-arena.half_extents.x, arena.half_extents.x),
         pos.y.clamp(-arena.half_extents.y, arena.half_extents.y),
-    )
+    );
+    let wall = if pos.x > arena.half_extents.x {
+        Some(arena.walls.east)
+    } else if pos.x < -arena.half_extents.x {
+        Some(arena.walls.west)
+    } else if pos.y > arena.half_extents.y {
+        Some(arena.walls.north)
+    } else if pos.y < -arena.half_extents.y {
+        Some(arena.walls.south)
+    } else {
+        None
+    };
+    (clamped, wall)
 }
 
 #[cfg(test)]
@@ -116,11 +129,22 @@ mod tests {
     }
 
     #[test]
-    fn arena_clamps() {
+    fn arena_clamps_and_reports_the_wall() {
         let arena = ArenaDef {
             half_extents: FxVec2::new(fx(10), fx(6)),
+            walls: crate::data::Walls {
+                east: WallSpec { splattable: true },
+                ..Default::default()
+            },
         };
-        let p = clamp_to_arena(&arena, FxVec2::new(fx(14), fx(-9)));
+        let (p, wall) = clamp_to_arena(&arena, FxVec2::new(fx(14), fx(-9)));
         assert_eq!(p, FxVec2::new(fx(10), fx(-6)));
+        assert_eq!(
+            wall,
+            Some(WallSpec { splattable: true }),
+            "x clamp wins at corners"
+        );
+        let (_, none) = clamp_to_arena(&arena, FxVec2::new(fx(3), fx(2)));
+        assert_eq!(none, None);
     }
 }

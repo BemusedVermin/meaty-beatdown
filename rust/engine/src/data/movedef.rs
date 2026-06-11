@@ -161,6 +161,71 @@ pub struct PropertyWindow {
     pub kind: PropertyKind,
 }
 
+/// What committing a move costs (spec §9). WAIT and the engine's built-in wake-up rises
+/// are free by construction; everything authored pays.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MoveCost {
+    pub breath: u32,
+    pub ap: u32,
+    pub focus: u32,
+}
+
+/// Which meter a conditional gain feeds.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GainResource {
+    Breath,
+    Ap,
+    Focus,
+}
+
+/// Success gate for a gain (spec §2.2): `ap_gain` is conditional on success, NEVER
+/// unconditional (rule R-5 outlaws self-reaching cycles with non-negative net gain;
+/// the audit enforces it over content).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GainGate {
+    OnHit,
+    OnCh,
+    OnBlock,
+    OnParry,
+    OnWhiffPunish,
+    Always,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResourceGain {
+    pub resource: GainResource,
+    pub amount: u32,
+    pub gate: GainGate,
+}
+
+/// When a cancel window's gate is satisfied (spec §11): lock-then-confirm — ON_HIT /
+/// ON_BLOCK are decided by the ACTUAL contact result, reacting to facts, never to the
+/// opponent's hidden input.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CancelGate {
+    OnHit,
+    OnBlock,
+    OnContact,
+    OnWhiff,
+    Always,
+}
+
+/// An authored cancel edge: during move ticks `[from, to]`, if `gate` is satisfied, the
+/// owner may pay and chain into `into` (spec §11). Strings (§6.4) are chains of these
+/// between normals; branch points are several windows sharing ticks.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CancelWindow {
+    pub from: u32,
+    pub to: u32,
+    pub gate: CancelGate,
+    pub into: MoveId,
+    pub ap_cost: u32,
+    pub focus_cost: u32,
+}
+
 /// Throw break key (spec §5.4): the defender's 2-way directional read. A THROW with
 /// `break_key: None` is an unbreakable command grab (pays heavily on the budget).
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -216,12 +281,22 @@ pub struct Move {
     pub region: ReachEnvelope,
     pub motion: SelfMotion,
 
-    // ── windows ──────────────────────────────────────────────────────────
+    // ── windows & costs (spec §9, §11) ───────────────────────────────────
     pub properties: Vec<PropertyWindow>,
+    pub cost: MoveCost,
+    pub gains: Vec<ResourceGain>,
+    pub cancels: Vec<CancelWindow>,
+    /// You cannot un-commit because the reveal scared you (spec §11): startup cancels
+    /// are authored, costed feint tech — the audit rejects startup-covering windows
+    /// unless this is set.
+    pub startup_cancelable: bool,
 
     // ── interaction ──────────────────────────────────────────────────────
     /// Required stance to commit (None = any grounded stance).
     pub req_stance: Option<StanceReq>,
+    /// Wake-up move: committable only from the wake-up decision (spec §6.3) —
+    /// reversals author this plus invuln startup windows.
+    pub req_down: bool,
     /// THROW only: the directional break read. None on a throw = unbreakable.
     pub break_key: Option<ThrowBreakKey>,
     /// STANCE only: what holding it does.

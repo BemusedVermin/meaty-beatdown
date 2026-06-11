@@ -12,12 +12,13 @@ pub mod ids;
 pub mod movedef;
 pub mod ruleset;
 
-pub use arena::ArenaDef;
+pub use arena::{ArenaDef, WallSpec, Walls};
 pub use defense::DefenseProfile;
 pub use hit::{HitEvent, Reaction};
 pub use ids::{FormId, MoveId};
 pub use movedef::{
-    Height, HeightMask, InvulnCover, Move, MoveCategory, PhaseMotion, PropertyKind, PropertyWindow,
-    ReachEnvelope, SelfMotion, StanceKind, StanceReq, StanceSpec, ThrowBreakKey, Timing, Tracking,
+    CancelGate, CancelWindow, GainGate, GainResource, Height, HeightMask, InvulnCover, Move,
+    MoveCategory, MoveCost, PhaseMotion, PropertyKind, PropertyWindow, ReachEnvelope, ResourceGain,
+    SelfMotion, StanceKind, StanceReq, StanceSpec, ThrowBreakKey, Timing, Tracking,
 };
-pub use ruleset::{ChDefault, Ruleset};
+pub use ruleset::{ChDefault, ExtenderLatches, FocusGains, Ruleset};

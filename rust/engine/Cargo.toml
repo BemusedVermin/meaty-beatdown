@@ -10,6 +10,10 @@ cordic.workspace = true
 fastrand.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+petgraph.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
 
 # Not workspace-inherited: the engine adds the float ban on top (C-DET, enforced by
 # construction). The app converts Fx -> f32 at the render boundary, so it must NOT carry it.

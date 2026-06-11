@@ -3,23 +3,23 @@
 //! state. Phase 1 subset: meters beyond HP/Guard, combo tracking, and latches join in
 //! Phase 2; height_off (airborne) with the juggle grammar.
 
-use crate::core::fx::FxVec2;
+use crate::core::fx::{Fx, FxVec2};
 use crate::core::ids::{EntityId, SideId};
 use crate::core::tick::Tick;
 use crate::data::movedef::{Move, StanceSpec, Timing};
 use crate::data::{DefenseProfile, MoveId};
 use serde::{Deserialize, Serialize};
 
-/// Body position (spec §2.3 `stance`). AIRBORNE joins with juggles (Phase 2).
+/// Body position (spec §2.3 `stance`).
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Stance {
     Standing,
     Crouching,
+    Airborne,
     Down,
 }
 
-/// What the actor is locked into right now (spec §2.3 `state`, Phase 1 subset).
-/// CRUMPLE/JUGGLE join with the combo system (Phase 2).
+/// What the actor is locked into right now (spec §2.3 `state`).
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ActorState {
     /// Fully actionable; decides at `ready_tick`.
@@ -30,6 +30,21 @@ pub enum ActorState {
     /// Ruleset's reevaluate interval and whenever an event touches it (spec §5.3).
     HoldingStance,
     Hitstun {
+        until: Tick,
+    },
+    /// Staggering toward collapse (spec §6.1): standing, juggleable, collapses to Down
+    /// at `until` if not picked up.
+    Crumple {
+        until: Tick,
+    },
+    /// Launched into a JUGGLE (spec §6.2): re-hittable until the air stun expires, then
+    /// lands into a knockdown.
+    Airborne {
+        stun_until: Tick,
+    },
+    /// Stuck on a splat-able wall, juggleable, gravity-suspended for an authored window
+    /// (spec §3.7) — once per combo.
+    WallSplat {
         until: Tick,
     },
     /// Reeling from a blocked hit; guard is still considered held.
@@ -44,7 +59,7 @@ pub enum ActorState {
     Grabbed {
         by: EntityId,
     },
-    /// On the ground; Phase 1 auto-rises at `until` (wake-up options join in Phase 2).
+    /// On the ground; the wake-up decision opens at `until` (spec §6.3).
     Down {
         until: Tick,
     },
@@ -65,6 +80,24 @@ pub struct MoveInstance {
     /// THROW: when the grab connected. The throw's hit `at` offsets are measured from
     /// this tick (the slam sequence starts when the hands touch).
     pub connected_at: Option<Tick>,
+    /// Contact bookkeeping for cancel gates (spec §11, lock-then-confirm): the gates
+    /// react to FACTS, never to the opponent's hidden input.
+    pub hit_landed: bool,
+    pub blocked: bool,
+    /// Bitmask of cancel-window indices already prompted (a decline is final for that
+    /// window; delay windows are a flagged refinement ⚠️).
+    pub cancels_prompted: u32,
+}
+
+/// Per-victim combo bookkeeping (spec §2.3): decay indices and the extender latches
+/// (governor 3). Reset when the victim regains freedom or hits the ground.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ComboTracker {
+    /// Hits taken this combo (indexes the decay schedules — governors 1 & 2).
+    pub hits: u32,
+    pub screw_used: u32,
+    pub bound_used: u32,
+    pub splat_used: u32,
 }
 
 /// Which timing phase a move is in at a given elapsed tick.
@@ -112,10 +145,21 @@ pub struct Entity {
     pub held: Option<StanceSpec>,
     /// Next scheduled re-decision while holding a stance.
     pub reevaluate_at: Tick,
+    /// Vertical offset while airborne (juggle arcs). Zero on the ground.
+    pub height_off: Fx,
     pub hp: u32,
     pub guard: u32,
     /// Ticks accumulated toward the next guard regen point.
     pub guard_regen_acc: u32,
+    /// Breath (exertion): regenerates while not executing (spec §9).
+    pub breath: u32,
+    pub breath_regen_acc: u32,
+    /// AP: the tempo budget; refills to max on regaining freedom (spec §9.4).
+    pub ap: u32,
+    /// Focus: the earned super gauge (spec §9).
+    pub focus: u32,
+    /// Combo bookkeeping while this actor is the VICTIM (governors 1–3).
+    pub combo: ComboTracker,
     /// The compiled movelist (opaque data to the engine — emitted by L4 from Phase 6).
     pub moves: Vec<Move>,
     pub defense: DefenseProfile,
@@ -165,5 +209,18 @@ impl Entity {
                     | ActorState::HoldingStance
                     | ActorState::GuardBroken { .. }
             )
+    }
+
+    /// Is the actor currently a combo victim (the states a combo rides on)? A hit on an
+    /// actor in one of these continues the combo; a hit on anyone else starts one.
+    #[must_use]
+    pub fn in_combo_state(&self) -> bool {
+        matches!(
+            self.state,
+            ActorState::Hitstun { .. }
+                | ActorState::Crumple { .. }
+                | ActorState::Airborne { .. }
+                | ActorState::WallSplat { .. }
+        )
     }
 }

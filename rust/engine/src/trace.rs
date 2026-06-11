@@ -11,7 +11,7 @@ use crate::combat::resolve::ContactOutcome;
 use crate::combat::schedule::Choice;
 use crate::core::ids::{EntityId, SideId};
 use crate::core::tick::Tick;
-use crate::data::MoveId;
+use crate::data::{MoveId, Reaction};
 use serde::{Deserialize, Serialize};
 
 /// How a connected grab resolved after the break read (spec §5.4).
@@ -22,6 +22,9 @@ pub enum ThrowResolution {
     Teched,
     /// Wrong guess or declined: the throw's hit events run.
     Thrown,
+    /// The thrower was interrupted (a trade, or later an ally's hit) between the
+    /// connect and the resolution: the grab dissolves and the victim goes free.
+    Interrupted,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -43,8 +46,24 @@ pub enum TraceEvent {
         victim: EntityId,
         mv: MoveId,
         outcome: ContactOutcome,
-        /// HP damage actually applied (post CH/armor scaling); 0 for non-damaging outcomes.
+        /// HP damage actually applied (post CH/decay/armor scaling); 0 for
+        /// non-damaging outcomes.
         damage: u32,
+        /// The reaction actually applied to the victim (post CH override, post latch
+        /// degradation) — what makes a §6.2 combo trace read as authored.
+        reaction: Option<Reaction>,
+        /// The victim's combo hit count including this hit (decay index + 1).
+        combo_hits: u32,
+    },
+    /// A juggle carried the victim into a splat-able wall (spec §3.7) — once per combo.
+    WallSplat { t: Tick, victim: EntityId },
+    /// An airborne victim's stun expired (or the gravity floor fired): they land.
+    Landed { t: Tick, victim: EntityId },
+    /// The victim regained freedom or hit the ground: the combo is over.
+    ComboEnded {
+        t: Tick,
+        victim: EntityId,
+        hits: u32,
     },
     /// The break read resolved a connected grab (spec §5.4).
     ThrowResolved {

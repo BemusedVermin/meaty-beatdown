@@ -1,6 +1,6 @@
-//! Shared Phase 1 test kit: a minimal authored Form ("Test Form") plus a declarative
-//! script driver. This is TEST content — the shipped content (and its audit) arrives in
-//! Phase 6; authored magnitudes here exist to exercise every spec §5 interaction.
+//! Shared test kit: a minimal authored Form ("Test Form") plus a declarative script
+//! driver. This is TEST content — the shipped content (and its audit gate in CI) arrives
+//! in Phase 6; authored magnitudes here exist to exercise every spec §5–§6 interaction.
 #![allow(dead_code)] // each test binary compiles this module; none uses all of it
 
 use engine::combat::schedule::{Choice, DecisionKind};
@@ -9,11 +9,13 @@ use engine::core::fx::{Fx, FxVec2, fx};
 use engine::core::ids::{EntityId, SideId};
 use engine::core::tick::Tick;
 use engine::data::movedef::{
-    HeightMask, InvulnCover, Move, MoveCategory, PhaseMotion, PropertyKind, PropertyWindow,
-    ReachEnvelope, SelfMotion, StanceKind, StanceReq, StanceSpec, ThrowBreakKey, Timing, Tracking,
+    CancelGate, CancelWindow, GainGate, GainResource, HeightMask, InvulnCover, Move, MoveCategory,
+    MoveCost, PhaseMotion, PropertyKind, PropertyWindow, ReachEnvelope, ResourceGain, SelfMotion,
+    StanceKind, StanceReq, StanceSpec, ThrowBreakKey, Timing, Tracking,
 };
 use engine::data::{
-    ArenaDef, ChDefault, DefenseProfile, FormId, Height, HitEvent, MoveId, Reaction, Ruleset,
+    ArenaDef, ChDefault, DefenseProfile, ExtenderLatches, FocusGains, FormId, Height, HitEvent,
+    MoveId, Reaction, Ruleset, WallSpec, Walls,
 };
 use std::collections::BTreeMap;
 
@@ -36,6 +38,13 @@ pub const CROUCH_GUARD: MoveId = MoveId(12);
 pub const PARRY: MoveId = MoveId(13);
 pub const WS_UPPERCUT: MoveId = MoveId(14);
 pub const POWER_CRUSH: MoveId = MoveId(16);
+// ── the combo string (Phase 2) ──
+pub const LAUNCHER: MoveId = MoveId(20);
+pub const JUGGLE_PALM: MoveId = MoveId(21);
+pub const SCREW_KICK: MoveId = MoveId(22);
+pub const BOUND_SLAM: MoveId = MoveId(23);
+pub const ENDER: MoveId = MoveId(24);
+pub const WAKE_REVERSAL: MoveId = MoveId(26);
 
 /// Exact fraction helper (the engine bans float literals; ratios are exact in Q32.32).
 #[must_use]
@@ -59,6 +68,7 @@ fn strike(
     timing: Timing,
     region: ReachEnvelope,
     hits: Vec<HitEvent>,
+    ap: u32,
 ) -> Move {
     Move {
         id,
@@ -73,7 +83,16 @@ fn strike(
         region,
         motion: SelfMotion::default(),
         properties: vec![],
+        cost: MoveCost {
+            breath: 1,
+            ap,
+            focus: 0,
+        },
+        gains: vec![],
+        cancels: vec![],
+        startup_cancelable: false,
         req_stance: None,
+        req_down: false,
         break_key: None,
         stance_spec: None,
     }
@@ -86,43 +105,62 @@ fn hit(at: u32, damage: u32, chip: u32, blockstun: u32, reaction: Reaction) -> H
         chip_guard: chip,
         blockstun,
         block_push: fxf(30, 100),
+        juggle_carry: fxf(50, 100),
         reaction,
         ch_reaction: None,
     }
 }
 
+fn chain(from: u32, to: u32, gate: CancelGate, into: MoveId, ap: u32, focus: u32) -> CancelWindow {
+    CancelWindow {
+        from,
+        to,
+        gate,
+        into,
+        ap_cost: ap,
+        focus_cost: focus,
+    }
+}
+
 /// The authored test kit. Reference frame data (1 unit = 1 m):
 ///
-/// | move        | type           | s/a/r    | notes                                   |
-/// |-------------|----------------|----------|-----------------------------------------|
-/// | JAB         | strike HIGH    | 6/2/8    | 30 dmg, hitstun 16, chip 12             |
-/// | MID_POKE    | strike MID     | 12/2/16  | 60 dmg, hitstun 20, CH: hard knockdown  |
-/// | SWEEP       | strike LOW     | 18/2/22  | 50 dmg, hard knockdown                  |
-/// | THROW_L/R   | throw, break L/R | 10/4/20 | grab; slam at +8 (70 dmg, knockdown)   |
-/// | SIDESTEP_L  | motion         | 3/6/4    | 1.2 lateral (left) during active        |
-/// | DASH_IN     | motion         | 2/4/3    | 1.5 forward                             |
-/// | BACKDASH    | motion         | 2/4/6    | -1.2 forward, strike-invuln ticks 0-4   |
-/// | STAND_GUARD | stance         | 2/0/4    | guards HIGH+MID                         |
-/// | CROUCH      | stance         | 1/0/2    | crouching, no guard                     |
-/// | CROUCH_GUARD| stance         | 2/0/4    | crouching, guards LOW                   |
-/// | PARRY       | utility        | 2/6/14   | guard-point H+M ticks 2-7, freeze 20    |
-/// | WS_UPPERCUT | strike MID     | 8/2/12   | requires crouch, 45 dmg hitstun 18      |
-/// | POWER_CRUSH | strike MID     | 14/2/18  | armor H+M ticks 2-13 (1 hit, 50% dmg)   |
+/// | move        | type             | s/a/r    | notes                                  |
+/// |-------------|------------------|----------|----------------------------------------|
+/// | JAB         | strike HIGH      | 6/2/8    | 30 dmg, hitstun 16; OnHit -> MID_POKE, |
+/// |             |                  |          | OnBlock -> JAB (the block string)      |
+/// | MID_POKE    | strike MID       | 12/2/16  | 60 dmg, hitstun 20, CH: hard knockdown |
+/// | SWEEP       | strike LOW       | 18/2/22  | 50 dmg, hard knockdown                 |
+/// | THROW_L/R   | throw, break L/R | 10/4/20  | grab; slam at +8 (70 dmg, knockdown)   |
+/// | LAUNCHER    | strike MID       | 15/2/20  | 55 dmg, Launch(1.5, 0.3, 40)           |
+/// | JUGGLE_PALM | strike MID       | 8/2/10   | 40 dmg, hitstun 30, carry 0.5; chains  |
+/// | SCREW_KICK  | strike MID       | 9/2/14   | 35 dmg, Screw(+1.8 carry, 34)          |
+/// | BOUND_SLAM  | strike MID       | 10/2/16  | 45 dmg, Bound(32); its windows cost    |
+/// |             |                  |          | Focus (the "special cancel" price)     |
+/// | ENDER       | strike MID       | 10/2/18  | 60 dmg, hard knockdown (the oki ender) |
+/// | WAKE_REVERSAL | strike MID     | 7/2/20   | req_down, invuln 0-8: the wake reversal|
 #[must_use]
 pub fn kit() -> Vec<Move> {
     let mut moves = vec![
-        strike(
-            JAB,
-            "jab",
-            Height::High,
-            Timing {
-                startup: 6,
-                active: 2,
-                recovery: 8,
-            },
-            envelope(0, 150, 50, 150),
-            vec![hit(0, 30, 12, 12, Reaction::Hitstun { ticks: 16 })],
-        ),
+        {
+            let mut m = strike(
+                JAB,
+                "jab",
+                Height::High,
+                Timing {
+                    startup: 6,
+                    active: 2,
+                    recovery: 8,
+                },
+                envelope(0, 150, 50, 150),
+                vec![hit(0, 30, 12, 12, Reaction::Hitstun { ticks: 16 })],
+                1,
+            );
+            m.cancels = vec![
+                chain(7, 12, CancelGate::OnHit, MID_POKE, 2, 0),
+                chain(7, 12, CancelGate::OnBlock, JAB, 3, 0),
+            ];
+            m
+        },
         {
             let mut m = strike(
                 MID_POKE,
@@ -135,6 +173,7 @@ pub fn kit() -> Vec<Move> {
                 },
                 envelope(0, 250, 60, 180),
                 vec![hit(0, 60, 10, 14, Reaction::Hitstun { ticks: 20 })],
+                2,
             );
             m.hits[0].ch_reaction = Some(Reaction::Knockdown {
                 hard: true,
@@ -162,6 +201,7 @@ pub fn kit() -> Vec<Move> {
                     down_ticks: 45,
                 },
             )],
+            2,
         ),
         throw(THROW_L, "shoulder toss", ThrowBreakKey::L),
         throw(THROW_R, "hip toss", ThrowBreakKey::R),
@@ -274,6 +314,7 @@ pub fn kit() -> Vec<Move> {
                 },
                 envelope(0, 0, 0, 0),
                 vec![],
+                1,
             );
             m.category = MoveCategory::Utility;
             m.properties = vec![PropertyWindow {
@@ -289,6 +330,11 @@ pub fn kit() -> Vec<Move> {
                     parry_recovery: 6,
                 },
             }];
+            m.gains = vec![ResourceGain {
+                resource: GainResource::Focus,
+                amount: 5,
+                gate: GainGate::OnParry,
+            }];
             m
         },
         {
@@ -303,6 +349,7 @@ pub fn kit() -> Vec<Move> {
                 },
                 envelope(0, 180, 60, 180),
                 vec![hit(0, 45, 8, 12, Reaction::Hitstun { ticks: 18 })],
+                2,
             );
             m.req_stance = Some(StanceReq::Crouching);
             m
@@ -319,6 +366,7 @@ pub fn kit() -> Vec<Move> {
                 },
                 envelope(0, 200, 70, 200),
                 vec![hit(0, 70, 12, 16, Reaction::Hitstun { ticks: 20 })],
+                3,
             );
             m.properties = vec![PropertyWindow {
                 from: 2,
@@ -331,6 +379,175 @@ pub fn kit() -> Vec<Move> {
                         mid: true,
                         low: false,
                     },
+                },
+            }];
+            m
+        },
+        // ── the combo string ────────────────────────────────────────────────
+        {
+            let mut m = strike(
+                LAUNCHER,
+                "rising dragon",
+                Height::Mid,
+                Timing {
+                    startup: 15,
+                    active: 2,
+                    recovery: 20,
+                },
+                envelope(0, 200, 60, 180),
+                vec![hit(
+                    0,
+                    55,
+                    10,
+                    14,
+                    Reaction::Launch {
+                        rise: fxf(150, 100),
+                        carry: fxf(30, 100),
+                        stun: 40,
+                    },
+                )],
+                3,
+            );
+            m.cancels = vec![chain(16, 24, CancelGate::OnHit, JUGGLE_PALM, 2, 0)];
+            // Juggle moves advance: the string chases its own carry (🔬 Tekken).
+            m.motion.startup = PhaseMotion {
+                forward: fxf(40, 100),
+                lateral: fx(0),
+            };
+            m
+        },
+        {
+            let mut m = strike(
+                JUGGLE_PALM,
+                "drifting palm",
+                Height::Mid,
+                Timing {
+                    startup: 8,
+                    active: 2,
+                    recovery: 10,
+                },
+                envelope(0, 200, 70, 200),
+                vec![hit(0, 40, 6, 10, Reaction::Hitstun { ticks: 30 })],
+                1,
+            );
+            m.cancels = vec![
+                chain(9, 14, CancelGate::OnHit, JUGGLE_PALM, 3, 0),
+                chain(9, 14, CancelGate::OnHit, SCREW_KICK, 2, 0),
+                chain(9, 14, CancelGate::OnHit, BOUND_SLAM, 2, 4),
+                chain(9, 14, CancelGate::OnHit, ENDER, 2, 0),
+            ];
+            m.motion.startup = PhaseMotion {
+                forward: fxf(80, 100),
+                lateral: fx(0),
+            };
+            m
+        },
+        {
+            let mut m = strike(
+                SCREW_KICK,
+                "spiral heel",
+                Height::Mid,
+                Timing {
+                    startup: 9,
+                    active: 2,
+                    recovery: 14,
+                },
+                envelope(0, 200, 70, 200),
+                vec![hit(
+                    0,
+                    35,
+                    6,
+                    10,
+                    Reaction::Screw {
+                        carry: fxf(180, 100),
+                        stun: 34,
+                    },
+                )],
+                2,
+            );
+            m.cancels = vec![
+                chain(10, 16, CancelGate::OnHit, JUGGLE_PALM, 2, 0),
+                chain(10, 16, CancelGate::OnHit, ENDER, 2, 0),
+            ];
+            m.motion.startup = PhaseMotion {
+                forward: fx(1),
+                lateral: fx(0),
+            };
+            m
+        },
+        {
+            let mut m = strike(
+                BOUND_SLAM,
+                "meteor slam",
+                Height::Mid,
+                Timing {
+                    startup: 10,
+                    active: 2,
+                    recovery: 16,
+                },
+                envelope(0, 200, 70, 200),
+                vec![hit(0, 45, 6, 10, Reaction::Bound { stun: 32 })],
+                3,
+            );
+            m.cancels = vec![
+                chain(11, 17, CancelGate::OnHit, JUGGLE_PALM, 2, 0),
+                chain(11, 17, CancelGate::OnHit, ENDER, 2, 0),
+            ];
+            m.motion.startup = PhaseMotion {
+                forward: fxf(80, 100),
+                lateral: fx(0),
+            };
+            m
+        },
+        {
+            let mut m = strike(
+                ENDER,
+                "falling star",
+                Height::Mid,
+                Timing {
+                    startup: 10,
+                    active: 2,
+                    recovery: 18,
+                },
+                envelope(0, 200, 70, 200),
+                vec![hit(
+                    0,
+                    60,
+                    8,
+                    12,
+                    Reaction::Knockdown {
+                        hard: true,
+                        down_ticks: 50,
+                    },
+                )],
+                2,
+            );
+            m.motion.startup = PhaseMotion {
+                forward: fxf(60, 100),
+                lateral: fx(0),
+            };
+            m
+        },
+        {
+            let mut m = strike(
+                WAKE_REVERSAL,
+                "rising tempest",
+                Height::Mid,
+                Timing {
+                    startup: 7,
+                    active: 2,
+                    recovery: 20,
+                },
+                envelope(0, 180, 70, 200),
+                vec![hit(0, 50, 8, 12, Reaction::Hitstun { ticks: 20 })],
+                2,
+            );
+            m.req_down = true;
+            m.properties = vec![PropertyWindow {
+                from: 0,
+                to: 8,
+                kind: PropertyKind::Invuln {
+                    covers: InvulnCover::All,
                 },
             }];
             m
@@ -360,6 +577,7 @@ fn throw(id: MoveId, name: &str, key: ThrowBreakKey) -> Move {
             chip_guard: 0,
             blockstun: 0,
             block_push: fx(0),
+            juggle_carry: fx(0),
             reaction: Reaction::Knockdown {
                 hard: true,
                 down_ticks: 50,
@@ -369,7 +587,16 @@ fn throw(id: MoveId, name: &str, key: ThrowBreakKey) -> Move {
         region: envelope(0, 90, 0, 0),
         motion: SelfMotion::default(),
         properties: vec![],
+        cost: MoveCost {
+            breath: 2,
+            ap: 2,
+            focus: 0,
+        },
+        gains: vec![],
+        cancels: vec![],
+        startup_cancelable: false,
         req_stance: None,
+        req_down: false,
         break_key: Some(key),
         stance_spec: None,
     }
@@ -389,7 +616,16 @@ fn motion_move(id: MoveId, name: &str, timing: Timing, motion: SelfMotion) -> Mo
         region: envelope(0, 0, 0, 0),
         motion,
         properties: vec![],
+        cost: MoveCost {
+            breath: 1,
+            ap: 1,
+            focus: 0,
+        },
+        gains: vec![],
+        cancels: vec![],
+        startup_cancelable: false,
         req_stance: None,
+        req_down: false,
         break_key: None,
         stance_spec: None,
     }
@@ -409,7 +645,12 @@ fn stance_move(id: MoveId, name: &str, timing: Timing, spec: StanceSpec) -> Move
         region: envelope(0, 0, 0, 0),
         motion: SelfMotion::default(),
         properties: vec![],
+        cost: MoveCost::default(),
+        gains: vec![],
+        cancels: vec![],
+        startup_cancelable: false,
         req_stance: None,
+        req_down: false,
         break_key: None,
         stance_spec: Some(spec),
     }
@@ -426,6 +667,28 @@ pub fn ruleset() -> Ruleset {
         throw_tech_recovery: 12,
         throw_tech_push: fx(1),
         block_reevaluate_every: 30,
+        hitstun_decay_step: 2,
+        juggle_decay_step: fxf(1, 10),
+        extender_latches: ExtenderLatches {
+            screw: 1,
+            bound: 1,
+            wall_splat: 1,
+        },
+        forced_landing: true,
+        splat_duration: 25,
+        landing_down_ticks: 35,
+        wake_rise_ticks: 8,
+        wake_back_rise_push: fxf(80, 100),
+        wake_back_rise_ticks: 12,
+        wake_delay_max: 30,
+        focus_gains: FocusGains {
+            land_hit: 2,
+            hit_blocked: 1,
+            take_damage_per_100: 3,
+            parry: 8,
+            counter_hit: 6,
+            whiff_punish: 10,
+        },
     }
 }
 
@@ -435,23 +698,55 @@ pub fn defense() -> DefenseProfile {
         hp_max: 1000,
         guard_max: 50,
         guard_regen_interval: 20,
+        weight: Fx::ONE,
+        breath_max: 100,
+        breath_regen_interval: 1,
+        ap_max: 24,
+        focus_max: 50,
     }
 }
 
-/// A 1v1 with both fighters on the x-axis, facing each other, `gap_cm` apart.
-#[must_use]
-pub fn duel(gap_cm: i32) -> CombatSim {
-    let half = fxf(gap_cm, 200);
-    CombatSim::new(SimConfig {
-        arena: ArenaDef {
-            half_extents: FxVec2::new(fx(10), fx(6)),
+fn arena() -> ArenaDef {
+    ArenaDef {
+        half_extents: FxVec2::new(fx(10), fx(6)),
+        walls: Walls {
+            east: WallSpec { splattable: true },
+            west: WallSpec { splattable: true },
+            north: WallSpec { splattable: true },
+            south: WallSpec { splattable: true },
         },
-        ruleset: ruleset(),
+    }
+}
+
+/// A 1v1 with both fighters at the given x positions (in cm), facing each other.
+#[must_use]
+pub fn duel_at(ax_cm: i32, bx_cm: i32) -> CombatSim {
+    duel_with(ruleset(), ax_cm, bx_cm)
+}
+
+/// As `duel_at`, but with no splat-able walls (pure clamp — geometry-neutral tests).
+#[must_use]
+pub fn duel_open_at(ax_cm: i32, bx_cm: i32) -> CombatSim {
+    let mut sim_arena = arena();
+    sim_arena.walls = Walls::default();
+    duel_full(ruleset(), sim_arena, ax_cm, bx_cm)
+}
+
+/// As `duel_at`, but under a custom Ruleset (governor-focused tests retune the curves).
+#[must_use]
+pub fn duel_with(rs: Ruleset, ax_cm: i32, bx_cm: i32) -> CombatSim {
+    duel_full(rs, arena(), ax_cm, bx_cm)
+}
+
+fn duel_full(rs: Ruleset, sim_arena: ArenaDef, ax_cm: i32, bx_cm: i32) -> CombatSim {
+    CombatSim::new(SimConfig {
+        arena: sim_arena,
+        ruleset: rs,
         entities: vec![
             EntitySetup {
                 id: A,
                 side: SIDE_A,
-                pos: FxVec2::new(-half, fx(0)),
+                pos: FxVec2::new(fxf(ax_cm, 100), fx(0)),
                 target: B,
                 ready_at: Tick::ZERO,
                 defense: defense(),
@@ -460,7 +755,7 @@ pub fn duel(gap_cm: i32) -> CombatSim {
             EntitySetup {
                 id: B,
                 side: SIDE_B,
-                pos: FxVec2::new(half, fx(0)),
+                pos: FxVec2::new(fxf(bx_cm, 100), fx(0)),
                 target: A,
                 ready_at: Tick::ZERO,
                 defense: defense(),
@@ -471,8 +766,15 @@ pub fn duel(gap_cm: i32) -> CombatSim {
     })
 }
 
+/// A 1v1 centered on the origin, `gap_cm` apart.
+#[must_use]
+pub fn duel(gap_cm: i32) -> CombatSim {
+    duel_at(-gap_cm / 2, gap_cm / 2)
+}
+
 /// Declarative script driver: choices keyed by (tick, actor). Unscripted prompts get
-/// defaults (Wait 4 / HoldStance / decline the break) so scenarios stay terse.
+/// defaults (Wait 4 / HoldStance / decline breaks and cancels / rise) so scenarios stay
+/// terse.
 pub struct Script {
     pub at: BTreeMap<(u64, u32), Choice>,
 }
@@ -486,11 +788,96 @@ impl Script {
     }
 
     fn choice_for(&self, t: Tick, actor: EntityId, kind: DecisionKind) -> Choice {
-        self.at.get(&(t.0, actor.0)).copied().unwrap_or(match kind {
-            DecisionKind::Ready => Choice::Wait { ticks: 4 },
-            DecisionKind::StanceReevaluate => Choice::HoldStance,
-            DecisionKind::ThrowBreak { .. } => Choice::ThrowBreak { guess: None },
-        })
+        self.at
+            .get(&(t.0, actor.0))
+            .copied()
+            .filter(|c| fits(*c, kind))
+            .unwrap_or(default_choice(kind))
+    }
+}
+
+/// Does a choice fit a prompt kind? (An actor can face two prompts on one tick — a
+/// tick-start decision and a mid-tick throw break — so replays match by kind.)
+#[must_use]
+pub fn fits(choice: Choice, kind: DecisionKind) -> bool {
+    matches!(
+        (kind, choice),
+        (
+            DecisionKind::Ready,
+            Choice::Wait { .. } | Choice::Move { .. }
+        ) | (
+            DecisionKind::StanceReevaluate,
+            Choice::HoldStance | Choice::Release | Choice::Move { .. }
+        ) | (DecisionKind::ThrowBreak { .. }, Choice::ThrowBreak { .. })
+            | (DecisionKind::Cancel, Choice::Cancel { .. })
+            | (
+                DecisionKind::WakeUp,
+                Choice::Rise | Choice::BackRise | Choice::DelayRise { .. } | Choice::Move { .. }
+            )
+    )
+}
+
+#[must_use]
+pub fn default_choice(kind: DecisionKind) -> Choice {
+    match kind {
+        DecisionKind::Ready => Choice::Wait { ticks: 4 },
+        DecisionKind::StanceReevaluate => Choice::HoldStance,
+        DecisionKind::ThrowBreak { .. } => Choice::ThrowBreak { guess: None },
+        DecisionKind::Cancel => Choice::Cancel { into: None },
+        DecisionKind::WakeUp => Choice::Rise,
+    }
+}
+
+/// Rebuild a replayable script from a trace's Committed events: a multimap consumed in
+/// trace order, matched to each prompt by kind (C-DET: the trace IS the decision log).
+#[must_use]
+pub fn replay_script(trace: &[engine::trace::TraceEvent]) -> ReplayScript {
+    let mut at: BTreeMap<(u64, u32), Vec<Choice>> = BTreeMap::new();
+    for e in trace {
+        if let engine::trace::TraceEvent::Committed { t, actor, choice } = e {
+            at.entry((t.0, actor.0)).or_default().push(*choice);
+        }
+    }
+    ReplayScript { at }
+}
+
+pub struct ReplayScript {
+    at: BTreeMap<(u64, u32), Vec<Choice>>,
+}
+
+/// Drive a sim from a recorded script until it ends.
+pub fn run_replay(sim: &mut CombatSim, script: &mut ReplayScript) -> SimStatus {
+    let mut guard = 0u32;
+    loop {
+        guard += 1;
+        assert!(guard < 1_000_000, "replay terminates");
+        match sim.advance() {
+            SimStatus::Over { winner } => return SimStatus::Over { winner },
+            SimStatus::AwaitingDecisions => {
+                let pending = sim.pending();
+                if pending
+                    .iter()
+                    .all(|p| !script.at.contains_key(&(sim.tick().0, p.actor.0)))
+                    && sim.tick().0 > script.at.keys().map(|k| k.0).max().unwrap_or(0)
+                {
+                    // Past the recording's horizon: the original stopped here.
+                    return SimStatus::AwaitingDecisions;
+                }
+                for p in pending {
+                    let key = (sim.tick().0, p.actor.0);
+                    let choice = script
+                        .at
+                        .get_mut(&key)
+                        .and_then(|v| {
+                            let idx = v.iter().position(|c| fits(*c, p.kind))?;
+                            Some(v.remove(idx))
+                        })
+                        .unwrap_or(default_choice(p.kind));
+                    sim.commit_side(p.side, &[(p.actor, choice)])
+                        .expect("recorded choice replays");
+                }
+            }
+        }
     }
 }
 
@@ -513,8 +900,12 @@ pub fn run(sim: &mut CombatSim, script: &Script, until: u64) -> SimStatus {
                         .filter(|p| p.side == side)
                         .map(|p| (p.actor, script.choice_for(sim.tick(), p.actor, p.kind)))
                         .collect();
-                    sim.commit_side(side, &choices)
-                        .expect("scripted choice is legal");
+                    if let Err(e) = sim.commit_side(side, &choices) {
+                        panic!(
+                            "scripted choice is illegal at {}: {e:?}\npending: {pending:?}\nchoices: {choices:?}",
+                            sim.tick()
+                        );
+                    }
                 }
             }
         }

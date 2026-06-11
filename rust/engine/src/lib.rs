@@ -9,6 +9,7 @@
 //! phases (implementation-plan).
 
 pub mod combat;
+pub mod content;
 pub mod core;
 pub mod data;
 pub mod trace;

@@ -12,8 +12,7 @@ use crate::data::movedef::ThrowBreakKey;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// Why an actor must decide (spec §4.1, Phase 1 subset — Cancel and Wake-up join in
-/// Phase 2, Burst in Phase 4).
+/// Why an actor must decide (spec §4.1 — Burst joins in Phase 4).
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DecisionKind {
@@ -25,6 +24,13 @@ pub enum DecisionKind {
     /// A grab connected (spec §5.4): guess the break key or decline. The key itself is
     /// NOT in the prompt — that read is the game (knowledge reveals it at T3, Phase 3).
     ThrowBreak { attacker: EntityId },
+    /// One or more cancel windows are open with gates satisfied (spec §11): take one
+    /// listed, affordable cancel (pay) or decline them all. Branch points are several
+    /// windows open at once; the choice names the target.
+    Cancel,
+    /// The wake-up decision (spec §6.3): rise / back-rise / delayed rise / an authored
+    /// `req_down` move (reversals).
+    WakeUp,
 }
 
 /// One actor's pending decision.
@@ -50,6 +56,17 @@ pub enum Choice {
     Release,
     /// The throw-break read (ThrowBreak only): `None` declines.
     ThrowBreak { guess: Option<ThrowBreakKey> },
+    /// The cancel decision (Cancel only): `Some(id)` pays and chains into a satisfied
+    /// window's target; `None` declines every window open this tick (final for those
+    /// windows; later windows prompt fresh).
+    Cancel { into: Option<MoveId> },
+    /// Wake-up: rise in place (WakeUp only).
+    Rise,
+    /// Wake-up: rise with a backward displacement (slower; creates space).
+    BackRise,
+    /// Wake-up: stay down for `ticks` more (≤ the Ruleset's wake_delay_max), then a
+    /// fresh wake-up decision — the oki timing mixup.
+    DelayRise { ticks: u32 },
 }
 
 /// A same-tick commit batch mid-collection. Sides commit independently; the sim executes
@@ -94,4 +111,7 @@ pub enum CommitError {
     AlreadyCommitted { actor: EntityId },
     /// Unknown move id, or the move's requirements are not met.
     UnknownOrUnmetMove { actor: EntityId },
+    /// DENIED (spec §9): the actor cannot afford this choice's costs. WAIT is always
+    /// affordable, so a denial never deadlocks the fight.
+    Denied { actor: EntityId },
 }
