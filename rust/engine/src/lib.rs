@@ -10,6 +10,7 @@
 
 pub mod combat;
 pub mod core;
+pub mod data;
 pub mod trace;
 
 /// Engine crate version, exposed so the app stub can prove the `app -> engine` arrow links.

@@ -1,46 +1,43 @@
-//! The determinism bedrock tests (implementation-plan Phase 0, tech-plan §6).
+//! The determinism gates (tech-plan §6), Phase 1 edition.
 //!
-//! Replay-twice and the cross-OS probe are CI gates from day one: every later phase builds
-//! on the guarantee proven here — same inputs, byte-identical trace, on every platform.
+//! - replay-twice: same script -> byte-identical traces.
+//! - replay-from-trace: the `Committed` events ARE the decision log (C-DET) — a fight
+//!   rebuilt from nothing but its own trace reproduces that trace byte for byte.
+//! - cross-OS probe: the canonical trace matches a checked-in reference; the same assert
+//!   passing on Ubuntu AND Windows CI is the cross-platform proof.
 
-use engine::combat::sim::{CombatSim, Decision, DecisionLog, EntityInit, SimConfig};
-use engine::core::ids::{EntityId, SideId};
-use engine::core::tick::Tick;
+mod common;
+
+use common::*;
+use engine::combat::schedule::Choice;
+use engine::data::movedef::ThrowBreakKey;
 use engine::trace::TraceEvent;
 
-/// The canonical Phase 0 scenario: two entities, interleaved WAITs, a shared decision tick
-/// (T7, exercising stable entity-id commit order), ending on a dry log at T8.
-fn canonical_scenario() -> (SimConfig, DecisionLog) {
-    let config = SimConfig {
-        entities: vec![
-            EntityInit {
-                id: EntityId(1),
-                side: SideId(0),
-                ready_at: Tick::ZERO,
+/// The canonical Phase 1 scenario: a real exchange touching block, chip, sidestep-whiff,
+/// CH whiff-punish, knockdown, and a throw break — every duel-core subsystem in ~90 ticks.
+fn canonical_script() -> Script {
+    Script::new([
+        (0, A, Choice::Move { id: MID_POKE }),
+        (0, B, Choice::Move { id: SIDESTEP_L }),
+        (13, B, Choice::Move { id: MID_POKE }),
+        // A rises from the CH knockdown at T65 and turtles; B chips then grabs.
+        (65, A, Choice::Move { id: STAND_GUARD }),
+        (43, B, Choice::Move { id: JAB }),
+        (67, B, Choice::Move { id: JAB }),
+        (83, B, Choice::Move { id: THROW_L }),
+        (
+            93,
+            A,
+            Choice::ThrowBreak {
+                guess: Some(ThrowBreakKey::L),
             },
-            EntityInit {
-                id: EntityId(2),
-                side: SideId(1),
-                ready_at: Tick::ZERO,
-            },
-        ],
-        max_ticks: 64,
-    };
-    let log = DecisionLog::new([
-        Decision::Wait { ticks: 3 },  // T0 e1 -> ready T3
-        Decision::Wait { ticks: 5 },  // T0 e2 -> ready T5
-        Decision::Wait { ticks: 4 },  // T3 e1 -> ready T7
-        Decision::Wait { ticks: 2 },  // T5 e2 -> ready T7
-        Decision::Wait { ticks: 1 },  // T7 e1 (id order first) -> ready T8
-        Decision::Wait { ticks: 10 }, // T7 e2 -> ready T17
-    ]);
-    (config, log)
+        ),
+    ])
 }
 
 fn run_canonical() -> Vec<TraceEvent> {
-    let (config, log) = canonical_scenario();
-    let mut sim = CombatSim::new(config);
-    sim.run(log);
+    let mut sim = duel(200);
+    run(&mut sim, &canonical_script(), 120);
     sim.trace().to_vec()
 }
 
@@ -49,44 +46,71 @@ fn trace_json(trace: &[TraceEvent]) -> String {
 }
 
 #[test]
-fn schedule_interleaves_by_ready_tick() {
-    let trace = run_canonical();
-    let commits: Vec<(u64, u32)> = trace
-        .iter()
-        .filter_map(|e| match e {
-            TraceEvent::Committed { t, actor, .. } => Some((t.0, actor.0)),
-            _ => None,
-        })
-        .collect();
-    // (tick, actor): interleaved by ready_tick; same-tick T7 resolves in entity-id order.
-    assert_eq!(
-        commits,
-        vec![(0, 1), (0, 2), (3, 1), (5, 2), (7, 1), (7, 2)]
-    );
-    // Dry log at e1's T8 decision point ends the sim there.
-    assert_eq!(trace.last(), Some(&TraceEvent::SimEnded { t: Tick(8) }));
-}
-
-/// C-DET: same (initial state, decision log) twice -> byte-identical serialized traces.
-#[test]
 fn replay_twice_byte_identical() {
     let first = trace_json(&run_canonical());
     let second = trace_json(&run_canonical());
     assert_eq!(first.into_bytes(), second.into_bytes());
 }
 
-/// The cross-OS probe: the canonical trace must match the checked-in reference byte for
-/// byte. The same assertion passing on Linux AND Windows CI is the cross-platform
-/// determinism proof. This is Phase 0 scaffolding, NOT golden vectors v2 (those freeze at
-/// Phase 6); regenerate deliberately via the ignored test below when the schema moves.
+/// Rebuild the script purely from the trace's Committed events and re-run: the trace is
+/// a sufficient record of the fight (the golden-vector contract rests on this).
+#[test]
+fn replay_from_trace_byte_identical() {
+    let original = run_canonical();
+    let recovered = Script {
+        at: original
+            .iter()
+            .filter_map(|e| match e {
+                TraceEvent::Committed { t, actor, choice } => Some(((t.0, actor.0), *choice)),
+                _ => None,
+            })
+            .collect(),
+    };
+    let mut sim = duel(200);
+    run(&mut sim, &recovered, 120);
+    assert_eq!(
+        trace_json(sim.trace()).into_bytes(),
+        trace_json(&original).into_bytes()
+    );
+}
+
+/// Same-tick decisions resolve in entity-id order; the schedule interleaves by
+/// ready_tick (spec §4.2) — asserted over the wait-only degenerate case.
+#[test]
+fn waits_interleave_in_stable_order() {
+    let mut sim = duel(400);
+    let script = Script::new([
+        (0, A, Choice::Wait { ticks: 3 }),
+        (0, B, Choice::Wait { ticks: 5 }),
+        (3, A, Choice::Wait { ticks: 4 }),
+        (5, B, Choice::Wait { ticks: 2 }),
+        (7, A, Choice::Wait { ticks: 1 }),
+        (7, B, Choice::Wait { ticks: 10 }),
+    ]);
+    run(&mut sim, &script, 7);
+    let commits: Vec<(u64, u32)> = sim
+        .trace()
+        .iter()
+        .filter_map(|e| match e {
+            TraceEvent::Committed { t, actor, .. } => Some((t.0, actor.0)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        commits,
+        vec![(0, 1), (0, 2), (3, 1), (5, 2), (7, 1), (7, 2)]
+    );
+}
+
+/// The cross-OS probe (Phase 0 scaffolding, NOT golden vectors v2 — those freeze at
+/// Phase 6). Regenerate deliberately when the schema moves:
+/// `cargo test -p engine --test determinism -- --ignored regenerate_probe`
 #[test]
 fn cross_os_probe_matches_reference() {
     let reference = include_str!("data/probe_trace.json");
     assert_eq!(trace_json(&run_canonical()), reference.trim_end());
 }
 
-/// Regeneration path (deliberate, with a changelog mention in the commit):
-/// `cargo test -p engine --test determinism -- --ignored regenerate_probe`
 #[test]
 #[ignore = "writes tests/data/probe_trace.json; run explicitly to regenerate"]
 fn regenerate_probe() {
