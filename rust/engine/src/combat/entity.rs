@@ -158,6 +158,8 @@ pub struct Entity {
     pub ap: u32,
     /// Focus: the earned super gauge (spec §9).
     pub focus: u32,
+    /// Phase 4 solo Burst latch: one Burst per fight per actor.
+    pub burst_used: bool,
     /// Combo bookkeeping while this actor is the VICTIM (governors 1–3).
     pub combo: ComboTracker,
     /// The compiled movelist (opaque data to the engine — emitted by L4 from Phase 6).

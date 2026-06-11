@@ -132,6 +132,7 @@ impl CombatSim {
                 breath_regen_acc: 0,
                 ap: e.defense.ap_max,
                 focus: 0,
+                burst_used: false,
                 combo: ComboTracker::default(),
                 moves: e.moves,
                 defense: e.defense,
@@ -534,6 +535,21 @@ impl CombatSim {
                     side: e.side,
                     kind: DecisionKind::WakeUp,
                 }),
+                ActorState::Hitstun { .. }
+                | ActorState::Crumple { .. }
+                | ActorState::Airborne { .. }
+                | ActorState::WallSplat { .. }
+                    if !e.burst_used
+                        && e.moves
+                            .iter()
+                            .any(|m| m.flags.burst && Self::affordable(e, m)) =>
+                {
+                    pending.push(PendingDecision {
+                        actor: e.id,
+                        side: e.side,
+                        kind: DecisionKind::Burst,
+                    });
+                }
                 ActorState::Acting if !self.open_cancels(i).is_empty() => {
                     pending.push(PendingDecision {
                         actor: e.id,
@@ -556,6 +572,45 @@ impl CombatSim {
 
     fn affordable(e: &Entity, mv: &Move) -> bool {
         e.breath >= mv.cost.breath && e.ap >= mv.cost.ap && e.focus >= mv.cost.focus
+    }
+
+    fn valid_target_for(&self, actor: &Entity, target: EntityId, mv: Option<&Move>) -> bool {
+        let Some(target_entity) = self.entities.iter().find(|e| e.id == target) else {
+            return false;
+        };
+        if target == actor.id {
+            return false;
+        }
+        if let Some(mv) = mv
+            && mv.flags.revive_hp > 0
+        {
+            return target_entity.side == actor.side && target_entity.state == ActorState::Ko;
+        }
+        target_entity.side != actor.side && target_entity.state != ActorState::Ko
+    }
+
+    fn ally_in_combo_state(&self, side: SideId, actor: EntityId) -> bool {
+        self.entities
+            .iter()
+            .any(|e| e.side == side && e.id != actor && e.in_combo_state())
+    }
+
+    fn can_commit_move(
+        &self,
+        actor: EntityId,
+        entity: &Entity,
+        mv: &Move,
+    ) -> Result<(), CommitError> {
+        if mv.flags.rescue && !self.ally_in_combo_state(entity.side, actor) {
+            return Err(CommitError::UnknownOrUnmetMove { actor });
+        }
+        if mv.flags.burst {
+            return Err(CommitError::UnknownOrUnmetMove { actor });
+        }
+        if !Self::affordable(entity, mv) {
+            return Err(CommitError::Denied { actor });
+        }
+        Ok(())
     }
 
     fn validate_choice(
@@ -581,16 +636,26 @@ impl CombatSim {
         let i = self.index_of(actor);
         match (pending.kind, choice) {
             (DecisionKind::Ready, Choice::Wait { .. }) => Ok(()),
-            (DecisionKind::Ready, Choice::Move { id }) => {
+            (DecisionKind::Ready, Choice::SwitchFocus { target }) => {
+                if self.valid_target_for(entity, target, None) {
+                    Ok(())
+                } else {
+                    Err(CommitError::UnknownOrUnmetMove { actor })
+                }
+            }
+            (DecisionKind::Ready, Choice::Move { id } | Choice::MoveAt { id, .. }) => {
                 let Some(mv) = entity.moves.iter().find(|m| m.id == id) else {
                     return Err(CommitError::UnknownOrUnmetMove { actor });
                 };
                 if mv.req_down {
                     return Err(CommitError::UnknownOrUnmetMove { actor });
                 }
-                if !Self::affordable(entity, mv) {
-                    return Err(CommitError::Denied { actor });
+                if let Choice::MoveAt { target, .. } = choice
+                    && !self.valid_target_for(entity, target, Some(mv))
+                {
+                    return Err(CommitError::UnknownOrUnmetMove { actor });
                 }
+                self.can_commit_move(actor, entity, mv)?;
                 // Free actors are standing; crouch-required moves are only reachable
                 // from a held crouching stance.
                 match mv.req_stance {
@@ -599,7 +664,14 @@ impl CombatSim {
                 }
             }
             (DecisionKind::StanceReevaluate, Choice::HoldStance | Choice::Release) => Ok(()),
-            (DecisionKind::StanceReevaluate, Choice::Move { id }) => {
+            (DecisionKind::StanceReevaluate, Choice::SwitchFocus { target }) => {
+                if self.valid_target_for(entity, target, None) {
+                    Ok(())
+                } else {
+                    Err(CommitError::UnknownOrUnmetMove { actor })
+                }
+            }
+            (DecisionKind::StanceReevaluate, Choice::Move { id } | Choice::MoveAt { id, .. }) => {
                 // Direct moves from a held stance: only from a pure body stance (no
                 // guard commitment) whose kind the move requires — the while-crouching
                 // idiom. Guarded holds must Release first (spec §5.3).
@@ -616,9 +688,12 @@ impl CombatSim {
                 if mv.req_down {
                     return Err(CommitError::UnknownOrUnmetMove { actor });
                 }
-                if !Self::affordable(entity, mv) {
-                    return Err(CommitError::Denied { actor });
+                if let Choice::MoveAt { target, .. } = choice
+                    && !self.valid_target_for(entity, target, Some(mv))
+                {
+                    return Err(CommitError::UnknownOrUnmetMove { actor });
                 }
+                self.can_commit_move(actor, entity, mv)?;
                 let matches_stance = matches!(
                     (held.stance, mv.req_stance),
                     (StanceKind::Crouching, Some(StanceReq::Crouching))
@@ -652,11 +727,32 @@ impl CombatSim {
                     })
                 }
             }
-            (DecisionKind::WakeUp, Choice::Move { id }) => {
+            (DecisionKind::WakeUp, Choice::Move { id } | Choice::MoveAt { id, .. }) => {
                 let Some(mv) = entity.moves.iter().find(|m| m.id == id) else {
                     return Err(CommitError::UnknownOrUnmetMove { actor });
                 };
                 if !mv.req_down {
+                    return Err(CommitError::UnknownOrUnmetMove { actor });
+                }
+                if let Choice::MoveAt { target, .. } = choice
+                    && !self.valid_target_for(entity, target, Some(mv))
+                {
+                    return Err(CommitError::UnknownOrUnmetMove { actor });
+                }
+                self.can_commit_move(actor, entity, mv)?;
+                Ok(())
+            }
+            (DecisionKind::Burst, Choice::Wait { .. }) => Ok(()),
+            (DecisionKind::Burst, Choice::Move { id } | Choice::MoveAt { id, .. }) => {
+                let Some(mv) = entity.moves.iter().find(|m| m.id == id) else {
+                    return Err(CommitError::UnknownOrUnmetMove { actor });
+                };
+                if !mv.flags.burst || entity.burst_used {
+                    return Err(CommitError::UnknownOrUnmetMove { actor });
+                }
+                if let Choice::MoveAt { target, .. } = choice
+                    && !self.valid_target_for(entity, target, Some(mv))
+                {
                     return Err(CommitError::UnknownOrUnmetMove { actor });
                 }
                 if !Self::affordable(entity, mv) {
@@ -685,6 +781,12 @@ impl CombatSim {
                     self.entities[i].ready_tick = t + u64::from(ticks.max(1));
                 }
                 Choice::Move { id } => self.start_move(i, id),
+                Choice::MoveAt { id, target } => self.start_move_at(i, id, Some(target)),
+                Choice::SwitchFocus { target } => {
+                    self.entities[i].target = target;
+                    self.auto_face_forced(i);
+                    self.entities[i].ready_tick = t + 3;
+                }
                 Choice::HoldStance => {
                     self.entities[i].reevaluate_at =
                         t + u64::from(self.ruleset.block_reevaluate_every);
@@ -736,7 +838,14 @@ impl CombatSim {
     }
 
     fn start_move(&mut self, i: usize, id: MoveId) {
+        self.start_move_at(i, id, None);
+    }
+
+    fn start_move_at(&mut self, i: usize, id: MoveId, target: Option<EntityId>) {
         let t = self.t;
+        if let Some(target) = target {
+            self.entities[i].target = target;
+        }
         self.auto_face_forced(i);
         let entity = &self.entities[i];
         let (index, mv) = entity
@@ -754,6 +863,7 @@ impl CombatSim {
             })
             .unwrap_or(0);
         let keeps_crouch = mv.req_stance == Some(StanceReq::Crouching);
+        let is_burst = mv.flags.burst;
         let cost = mv.cost;
         let always_gains: Vec<(GainResource, u32)> = mv
             .gains
@@ -765,6 +875,9 @@ impl CombatSim {
         e.breath = e.breath.saturating_sub(cost.breath);
         e.ap = e.ap.saturating_sub(cost.ap);
         e.focus = e.focus.saturating_sub(cost.focus);
+        if is_burst {
+            e.burst_used = true;
+        }
         e.current = Some(MoveInstance {
             move_id: id,
             move_index: index,
@@ -921,6 +1034,7 @@ impl CombatSim {
         }
         let mut resolved: Vec<Resolved> = Vec::new();
         let mut connects: Vec<(usize, usize)> = Vec::new();
+        let mut revives: Vec<(usize, usize, Move)> = Vec::new();
 
         for (ai, attacker) in snapshot.iter().enumerate() {
             if attacker.state != ActorState::Acting {
@@ -975,7 +1089,7 @@ impl CombatSim {
                         debug_assert!(false, "throw authored without hits");
                         continue;
                     };
-                    match resolve::resolve_contact(mv, first_hit, victim, t) {
+                    match resolve::resolve_contact(mv, first_hit, victim, t, false) {
                         ContactOutcome::ThrowTech => {
                             // Mutual throws clash exactly once per pair.
                             if !connects.iter().any(|&(a, v)| a == vi && v == ai) {
@@ -1006,13 +1120,22 @@ impl CombatSim {
                     }
                 }
                 MoveCategory::Strike | MoveCategory::Motion | MoveCategory::Utility => {
+                    if mv.flags.revive_hp > 0 && active_offset == 0 {
+                        if let Some(victim) = snapshot.iter().find(|e| e.id == attacker.target)
+                            && victim.side == attacker.side
+                            && victim.state == ActorState::Ko
+                        {
+                            revives.push((ai, self.index_of(victim.id), mv.clone()));
+                        }
+                        continue;
+                    }
                     for (hi, hit) in mv.hits.iter().enumerate() {
                         if hit.at != active_offset {
                             continue;
                         }
                         for (vi, victim) in snapshot.iter().enumerate() {
                             if vi == ai
-                                || victim.side == attacker.side
+                                || (victim.side == attacker.side && !mv.flags.friendly_fire)
                                 || victim.state == ActorState::Ko
                             {
                                 continue;
@@ -1020,7 +1143,8 @@ impl CombatSim {
                             if !spatial::does_hit_spatially(attacker, mv, victim) {
                                 continue;
                             }
-                            let outcome = resolve::resolve_contact(mv, hit, victim, t);
+                            let back_hit = is_back_hit(attacker, victim);
+                            let outcome = resolve::resolve_contact(mv, hit, victim, t, back_hit);
                             resolved.push(Resolved {
                                 attacker: ai,
                                 victim: vi,
@@ -1037,6 +1161,9 @@ impl CombatSim {
 
         for r in resolved {
             self.apply_outcome(r.attacker, r.victim, &r.mv, r.hit_index, r.outcome);
+        }
+        for (ai, vi, mv) in revives {
+            self.apply_revive(ai, vi, &mv);
         }
 
         // Grab connects open break prompts — one batch, defender side(s) commit blind.
@@ -1305,6 +1432,41 @@ impl CombatSim {
             damage: damage_applied,
             reaction: reaction_applied,
             combo_hits,
+        });
+
+        if mv.flags.burst && matches!(outcome, ContactOutcome::Hit { .. } | ContactOutcome::Whiff) {
+            self.interrupt_actor(ai);
+            self.interrupt_actor(vi);
+            self.entities[ai].combo = ComboTracker::default();
+            self.entities[vi].combo = ComboTracker::default();
+            self.set_free(ai, t);
+            self.set_free(vi, t);
+        }
+    }
+
+    fn apply_revive(&mut self, ai: usize, vi: usize, mv: &Move) {
+        if self.entities[vi].state != ActorState::Ko || mv.flags.revive_hp == 0 {
+            return;
+        }
+        if let Some(inst) = &mut self.entities[ai].current {
+            inst.hit_landed = true;
+        }
+        let hp = mv.flags.revive_hp.min(self.entities[vi].defense.hp_max);
+        let v = &mut self.entities[vi];
+        v.hp = hp;
+        v.guard = v.defense.guard_max;
+        v.breath = v.defense.breath_max;
+        v.ap = v.defense.ap_max;
+        v.focus = v.focus.min(v.defense.focus_max);
+        v.state = ActorState::Down {
+            until: self.t + u64::from(self.ruleset.wake_rise_ticks.max(1)),
+        };
+        v.stance = Stance::Down;
+        v.combo = ComboTracker::default();
+        self.trace.push(TraceEvent::Revived {
+            t: self.t,
+            actor: v.id,
+            hp,
         });
     }
 
@@ -1698,4 +1860,9 @@ impl CombatSim {
 /// Integer damage scaled by an authored fixed-point multiplier (deterministic floor).
 fn scale_damage(damage: u32, mult: Fx) -> u32 {
     (Fx::from_num(damage) * mult).to_num::<u32>()
+}
+
+fn is_back_hit(attacker: &Entity, victim: &Entity) -> bool {
+    let toward_attacker = (attacker.pos - victim.pos).normalize_or_zero();
+    toward_attacker != FxVec2::ZERO && victim.facing.dot(toward_attacker) < Fx::ZERO
 }

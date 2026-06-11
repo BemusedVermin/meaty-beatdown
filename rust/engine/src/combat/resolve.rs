@@ -78,7 +78,13 @@ pub fn throwing_now(defender: &Entity, t: Tick) -> bool {
 /// The priority table (spec §5.1). `does_hit` has already passed spatially; this decides
 /// what the touch IS. Returns the outcome plus the armor damage multiplier when armored.
 #[must_use]
-pub fn resolve_contact(mv: &Move, _hit: &HitEvent, defender: &Entity, t: Tick) -> ContactOutcome {
+pub fn resolve_contact(
+    mv: &Move,
+    _hit: &HitEvent,
+    defender: &Entity,
+    t: Tick,
+    back_hit: bool,
+) -> ContactOutcome {
     // 1. INVULN to this category -> WHIFF.
     for prop in active_properties(defender, t) {
         if let PropertyKind::Invuln { covers } = prop
@@ -102,24 +108,27 @@ pub fn resolve_contact(mv: &Move, _hit: &HitEvent, defender: &Entity, t: Tick) -
 
     // 3. GUARD_POINT covering this strike -> PARRIED (parry beats even unblockables;
     //    it loses to throws — already branched — and to the uncovered height).
-    for prop in active_properties(defender, t) {
-        if let PropertyKind::GuardPoint {
-            covers,
-            freeze_attacker,
-            parry_recovery,
-        } = prop
-            && covers.covers(mv.height)
-        {
-            return ContactOutcome::Parried {
+    if !back_hit {
+        for prop in active_properties(defender, t) {
+            if let PropertyKind::GuardPoint {
+                covers,
                 freeze_attacker,
                 parry_recovery,
-            };
+            } = prop
+                && covers.covers(mv.height)
+            {
+                return ContactOutcome::Parried {
+                    freeze_attacker,
+                    parry_recovery,
+                };
+            }
         }
     }
 
     // 4. Guarding and the held mask covers the height -> BLOCKED (the mixup: an
     //    uncovered height falls through). Unblockables skip this branch entirely.
-    if mv.blockable
+    if !back_hit
+        && mv.blockable
         && defender.guarding()
         && defender
             .held

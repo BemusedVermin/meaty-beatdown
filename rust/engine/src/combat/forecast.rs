@@ -116,6 +116,7 @@ fn projection(obs: &Observation) -> CombatSim {
             breath_regen_acc: 0,
             ap: view.ap.unwrap_or(0),
             focus: view.focus.unwrap_or(0),
+            burst_used: false,
             combo: ComboTracker::default(),
             moves: Vec::new(),
             defense: statue_defense(hp),
@@ -130,7 +131,7 @@ fn projection(obs: &Observation) -> CombatSim {
 pub fn forecast(obs: &Observation, actor: EntityId, choice: Choice) -> Forecast {
     let mut sim = projection(obs);
     let horizon = match (&choice, obs.ally(actor)) {
-        (Choice::Move { id }, Some(me)) => me
+        (Choice::Move { id } | Choice::MoveAt { id, .. }, Some(me)) => me
             .moves
             .iter()
             .find(|m| m.id == *id)
@@ -164,6 +165,7 @@ pub fn forecast(obs: &Observation, actor: EntityId, choice: Choice) -> Forecast 
                             }
                             super::schedule::DecisionKind::Cancel => Choice::Cancel { into: None },
                             super::schedule::DecisionKind::WakeUp => Choice::Rise,
+                            super::schedule::DecisionKind::Burst => Choice::Wait { ticks: 1 },
                         }
                     };
                     let _ = sim.commit_side(p.side, &[(p.actor, c)]);

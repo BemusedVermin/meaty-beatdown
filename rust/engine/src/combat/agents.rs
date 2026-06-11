@@ -59,6 +59,7 @@ impl Agent {
             DecisionKind::ThrowBreak { .. } => self.break_read(me, foe),
             DecisionKind::Cancel => self.cancel(me),
             DecisionKind::WakeUp => self.wake(me),
+            DecisionKind::Burst => self.burst(me),
         }
     }
 
@@ -133,6 +134,8 @@ impl Agent {
             .filter(|m| {
                 m.category == MoveCategory::Strike
                     && !m.req_down
+                    && !m.flags.rescue
+                    && !m.flags.burst
                     && m.req_stance != Some(StanceReq::Crouching)
                     && affordable(me, m)
                     && m.region.max_range >= dist
@@ -216,6 +219,13 @@ impl Agent {
             ReadProfile::StepHappy => Choice::BackRise,
         }
     }
+
+    fn burst(&mut self, me: &Entity) -> Choice {
+        me.moves
+            .iter()
+            .find(|m| m.flags.burst && affordable(me, m))
+            .map_or(Choice::Wait { ticks: 1 }, |m| Choice::Move { id: m.id })
+    }
 }
 
 /// The always-legal default per prompt kind (drivers use this when an agent's pick is
@@ -228,6 +238,7 @@ pub fn fallback(kind: DecisionKind) -> Choice {
         DecisionKind::ThrowBreak { .. } => Choice::ThrowBreak { guess: None },
         DecisionKind::Cancel => Choice::Cancel { into: None },
         DecisionKind::WakeUp => Choice::Rise,
+        DecisionKind::Burst => Choice::Wait { ticks: 1 },
     }
 }
 

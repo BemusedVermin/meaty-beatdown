@@ -143,6 +143,7 @@ pub fn event_public_for(
         | TraceEvent::Landed { .. }
         | TraceEvent::ComboEnded { .. }
         | TraceEvent::Ko { .. }
+        | TraceEvent::Revived { .. }
         | TraceEvent::SimEnded { .. } => true,
     }
 }

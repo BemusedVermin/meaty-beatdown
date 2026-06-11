@@ -27,7 +27,10 @@ fn random_choice(
         .unwrap_or_default();
     let mut candidates: Vec<Choice> = Vec::new();
     match kind {
-        DecisionKind::Ready | DecisionKind::StanceReevaluate | DecisionKind::WakeUp => {
+        DecisionKind::Ready
+        | DecisionKind::StanceReevaluate
+        | DecisionKind::WakeUp
+        | DecisionKind::Burst => {
             for _ in 0..3 {
                 let idx = rng.usize(0..movelist.len());
                 candidates.push(Choice::Move {
@@ -54,6 +57,7 @@ fn random_choice(
                         },
                     });
                 }
+                DecisionKind::Burst => candidates.push(Choice::Wait { ticks: 1 }),
                 _ => unreachable!(),
             }
         }
@@ -81,6 +85,7 @@ fn random_choice(
         DecisionKind::ThrowBreak { .. } => Choice::ThrowBreak { guess: None },
         DecisionKind::Cancel => Choice::Cancel { into: None },
         DecisionKind::WakeUp => Choice::Rise,
+        DecisionKind::Burst => Choice::Wait { ticks: 1 },
     });
     candidates
 }

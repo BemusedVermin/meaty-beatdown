@@ -31,6 +31,8 @@ pub enum DecisionKind {
     /// The wake-up decision (spec §6.3): rise / back-rise / delayed rise / an authored
     /// `req_down` move (reversals).
     WakeUp,
+    /// Phase 4 solo Burst window from combo-victim states.
+    Burst,
 }
 
 /// One actor's pending decision.
@@ -50,6 +52,10 @@ pub enum Choice {
     Wait { ticks: u32 },
     /// Commit an authored move at the actor's current target.
     Move { id: MoveId },
+    /// Retarget, then commit an authored move.
+    MoveAt { id: MoveId, target: EntityId },
+    /// Quick defensive re-facing without an authored attack.
+    SwitchFocus { target: EntityId },
     /// Keep holding the current stance (StanceReevaluate only).
     HoldStance,
     /// Release the held stance, paying its authored release recovery (spec §5.3).

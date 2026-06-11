@@ -20,7 +20,8 @@ pub use ids::{FormId, MoveId};
 pub use knowledge::{KnowledgeBook, KnowledgeTier};
 pub use movedef::{
     CancelGate, CancelWindow, CueClass, GainGate, GainResource, Height, HeightMask, InvulnCover,
-    Move, MoveCategory, MoveCost, PhaseMotion, PropertyKind, PropertyWindow, ReachEnvelope,
-    ResourceGain, SelfMotion, StanceKind, StanceReq, StanceSpec, ThrowBreakKey, Timing, Tracking,
+    Move, MoveCategory, MoveCost, MoveFlags, PhaseMotion, PropertyKind, PropertyWindow,
+    ReachEnvelope, ResourceGain, SelfMotion, StanceKind, StanceReq, StanceSpec, ThrowBreakKey,
+    Timing, Tracking,
 };
 pub use ruleset::{ChDefault, ExtenderLatches, FocusGains, Ruleset};

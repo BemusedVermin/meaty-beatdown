@@ -256,6 +256,20 @@ pub struct StanceSpec {
     pub guard: Option<HeightMask>,
 }
 
+/// Party-combat flags and small utility effects (spec §8). These stay authored data:
+/// rescue, Burst, friendly fire, and revival are not special move ids.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MoveFlags {
+    /// Can this hit allies? Default false: party sweeps and beams clip enemies, not friends.
+    pub friendly_fire: bool,
+    /// Legal only when an ally is currently a combo victim.
+    pub rescue: bool,
+    /// Legal from combo-victim states, consumes the actor's once-per-fight Burst latch.
+    pub burst: bool,
+    /// UTILITY revival amount. Zero means "not a revive move".
+    pub revive_hp: u32,
+}
+
 /// Stance requirement for committing a move (spec §2.2 `reqs`). A move with
 /// `StanceReq::Crouching` may be committed directly from a held crouching stance (the
 /// while-rising idiom) without paying the stance's release recovery.
@@ -312,4 +326,6 @@ pub struct Move {
     pub break_key: Option<ThrowBreakKey>,
     /// STANCE only: what holding it does.
     pub stance_spec: Option<StanceSpec>,
+    /// Phase 4 party flags and utility effects.
+    pub flags: MoveFlags,
 }

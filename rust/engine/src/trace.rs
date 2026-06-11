@@ -76,6 +76,8 @@ pub enum TraceEvent {
     GuardBroken { t: Tick, actor: EntityId },
     /// HP reached zero; the actor is out of the fight.
     Ko { t: Tick, actor: EntityId },
+    /// A KO'd actor was restored by an authored utility move.
+    Revived { t: Tick, actor: EntityId, hp: u32 },
     /// The fight ended. `winner` is None on a `max_ticks` cap or a mutual wipe.
     SimEnded { t: Tick, winner: Option<SideId> },
 }

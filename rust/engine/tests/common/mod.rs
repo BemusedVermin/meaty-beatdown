@@ -10,8 +10,8 @@ use engine::core::ids::{EntityId, SideId};
 use engine::core::tick::Tick;
 use engine::data::movedef::{
     CancelGate, CancelWindow, CueClass, GainGate, GainResource, HeightMask, InvulnCover, Move,
-    MoveCategory, MoveCost, PhaseMotion, PropertyKind, PropertyWindow, ReachEnvelope, ResourceGain,
-    SelfMotion, StanceKind, StanceReq, StanceSpec, ThrowBreakKey, Timing, Tracking,
+    MoveCategory, MoveCost, MoveFlags, PhaseMotion, PropertyKind, PropertyWindow, ReachEnvelope,
+    ResourceGain, SelfMotion, StanceKind, StanceReq, StanceSpec, ThrowBreakKey, Timing, Tracking,
 };
 use engine::data::{
     ArenaDef, ChDefault, DefenseProfile, ExtenderLatches, FocusGains, FormId, Height, HitEvent,
@@ -45,6 +45,10 @@ pub const SCREW_KICK: MoveId = MoveId(22);
 pub const BOUND_SLAM: MoveId = MoveId(23);
 pub const ENDER: MoveId = MoveId(24);
 pub const WAKE_REVERSAL: MoveId = MoveId(26);
+pub const BURST: MoveId = MoveId(30);
+pub const RESCUE_STRIKE: MoveId = MoveId(31);
+pub const REVIVE: MoveId = MoveId(32);
+pub const WIDE_CLEAVE: MoveId = MoveId(33);
 
 // ── the cue vocabulary (spec §7.2): shared cues ARE the feints ──
 /// JAB: the quick high flick.
@@ -117,6 +121,7 @@ fn strike(
         req_down: false,
         break_key: None,
         stance_spec: None,
+        flags: MoveFlags::default(),
     }
 }
 
@@ -586,6 +591,103 @@ pub fn kit() -> Vec<Move> {
             }];
             m
         },
+        {
+            let mut m = strike(
+                BURST,
+                "burst",
+                Height::Mid,
+                Timing {
+                    startup: 0,
+                    active: 1,
+                    recovery: 1,
+                },
+                envelope(0, 180, 180, 180),
+                vec![hit(0, 0, 0, 0, Reaction::Push { dist: fx(1) })],
+                0,
+                CUE_FLURRY,
+            );
+            m.flags.burst = true;
+            m.properties = vec![PropertyWindow {
+                from: 0,
+                to: 1,
+                kind: PropertyKind::Invuln {
+                    covers: InvulnCover::All,
+                },
+            }];
+            m
+        },
+        {
+            let mut m = strike(
+                RESCUE_STRIKE,
+                "rescue shoulder",
+                Height::Mid,
+                Timing {
+                    startup: 6,
+                    active: 2,
+                    recovery: 16,
+                },
+                envelope(0, 600, 180, 260),
+                vec![hit(0, 55, 8, 12, Reaction::Hitstun { ticks: 20 })],
+                2,
+                CUE_FLURRY,
+            );
+            m.flags.rescue = true;
+            m.motion.startup = PhaseMotion {
+                forward: fxf(120, 100),
+                lateral: fx(0),
+            };
+            m.properties = vec![PropertyWindow {
+                from: 0,
+                to: 5,
+                kind: PropertyKind::Armor {
+                    hits: 1,
+                    dmg_mult: fxf(1, 2),
+                    covers: HeightMask {
+                        high: true,
+                        mid: true,
+                        low: false,
+                    },
+                },
+            }];
+            m
+        },
+        {
+            let mut m = strike(
+                REVIVE,
+                "revive",
+                Height::None,
+                Timing {
+                    startup: 8,
+                    active: 1,
+                    recovery: 18,
+                },
+                envelope(0, 100, 50, 50),
+                vec![],
+                4,
+                CUE_GUARD,
+            );
+            m.category = MoveCategory::Utility;
+            m.flags.revive_hp = 250;
+            m
+        },
+        {
+            let mut m = strike(
+                WIDE_CLEAVE,
+                "wide cleave",
+                Height::Mid,
+                Timing {
+                    startup: 10,
+                    active: 2,
+                    recovery: 20,
+                },
+                envelope(0, 280, 180, 220),
+                vec![hit(0, 65, 10, 14, Reaction::Hitstun { ticks: 18 })],
+                3,
+                CUE_FLURRY,
+            );
+            m.tracking = Tracking::Homing;
+            m
+        },
     ];
     moves.sort_by_key(|m| m.id);
     moves
@@ -634,6 +736,7 @@ fn throw(id: MoveId, name: &str, key: ThrowBreakKey) -> Move {
         req_down: false,
         break_key: Some(key),
         stance_spec: None,
+        flags: MoveFlags::default(),
     }
 }
 
@@ -666,6 +769,7 @@ fn motion_move(id: MoveId, name: &str, timing: Timing, motion: SelfMotion) -> Mo
         req_down: false,
         break_key: None,
         stance_spec: None,
+        flags: MoveFlags::default(),
     }
 }
 
@@ -692,6 +796,7 @@ fn stance_move(id: MoveId, name: &str, timing: Timing, spec: StanceSpec) -> Move
         req_down: false,
         break_key: None,
         stance_spec: Some(spec),
+        flags: MoveFlags::default(),
     }
 }
 
@@ -861,15 +966,30 @@ pub fn fits(choice: Choice, kind: DecisionKind) -> bool {
         (kind, choice),
         (
             DecisionKind::Ready,
-            Choice::Wait { .. } | Choice::Move { .. }
+            Choice::Wait { .. }
+                | Choice::Move { .. }
+                | Choice::MoveAt { .. }
+                | Choice::SwitchFocus { .. }
         ) | (
             DecisionKind::StanceReevaluate,
-            Choice::HoldStance | Choice::Release | Choice::Move { .. }
+            Choice::HoldStance
+                | Choice::Release
+                | Choice::Move { .. }
+                | Choice::MoveAt { .. }
+                | Choice::SwitchFocus { .. }
         ) | (DecisionKind::ThrowBreak { .. }, Choice::ThrowBreak { .. })
             | (DecisionKind::Cancel, Choice::Cancel { .. })
             | (
                 DecisionKind::WakeUp,
-                Choice::Rise | Choice::BackRise | Choice::DelayRise { .. } | Choice::Move { .. }
+                Choice::Rise
+                    | Choice::BackRise
+                    | Choice::DelayRise { .. }
+                    | Choice::Move { .. }
+                    | Choice::MoveAt { .. }
+            )
+            | (
+                DecisionKind::Burst,
+                Choice::Wait { .. } | Choice::Move { .. } | Choice::MoveAt { .. }
             )
     )
 }
@@ -882,6 +1002,7 @@ pub fn default_choice(kind: DecisionKind) -> Choice {
         DecisionKind::ThrowBreak { .. } => Choice::ThrowBreak { guess: None },
         DecisionKind::Cancel => Choice::Cancel { into: None },
         DecisionKind::WakeUp => Choice::Rise,
+        DecisionKind::Burst => Choice::Wait { ticks: 1 },
     }
 }
 
